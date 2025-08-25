@@ -20,6 +20,7 @@ from napari.types import ImageData
 from skimage.filters import butterworth
 from glob import glob
 import sys
+from collections import Counter
 
 warnings.filterwarnings('ignore', category=FutureWarning)
 
@@ -407,13 +408,27 @@ class CryoEMFibrilAnnotator:
         )
         
         # Add shapes layer for annotations
-        self.shapes_layer = self.viewer.add_shapes(
-            name='Fibril Annotations',
-            shape_type='path',
-            edge_color='red',
-            edge_width=2,
-            face_color='transparent'
-        )
+        # Set ndim to match the image stack (3D if stack, 2D if single image)
+        if len(self.original_stack.shape) > 2:
+            # 3D stack - annotations are per frame
+            self.shapes_layer = self.viewer.add_shapes(
+                name='Fibril Annotations',
+                ndim=3,  # This ensures annotations are per-frame
+                shape_type='line',  # Lines for fibril annotation
+                edge_color='red',
+                edge_width=2,
+                face_color='transparent'
+            )
+        else:
+            # Single 2D image
+            self.shapes_layer = self.viewer.add_shapes(
+                name='Fibril Annotations',
+                ndim=2,
+                shape_type='line',
+                edge_color='red',
+                edge_width=2,
+                face_color='transparent'
+            )
         
         # Create filter control widget
         @magicgui(
@@ -455,20 +470,46 @@ class CryoEMFibrilAnnotator:
                 annotations = {
                     'shapes': self.shapes_layer.data,
                     'shape_types': self.shapes_layer.shape_type,
+                    'properties': self.shapes_layer.properties,  # Any additional properties
                     'pixel_size': self.pixel_size,
-                    'mrc_files': self.mrc_files
+                    'mrc_files': self.mrc_files,
+                    'ndim': self.shapes_layer.ndim,  # Important for reloading
                 }
+                
+                # For 3D annotations, include frame information
+                if self.shapes_layer.ndim == 3:
+                    # Extract which frame each annotation belongs to
+                    frame_indices = []
+                    for shape in self.shapes_layer.data:
+                        # First coordinate is the frame index in 3D
+                        if len(shape) > 0:
+                            frame_idx = int(shape[0, 0])  # z-coordinate
+                            frame_indices.append(frame_idx)
+                    annotations['frame_indices'] = frame_indices
+                    
+                    # Count annotations per frame
+                    from collections import Counter
+                    frame_counts = Counter(frame_indices)
+                    total_frames_with_annotations = len(frame_counts)
+                    
+                    print(f"Annotations summary:")
+                    print(f"  Total annotations: {len(self.shapes_layer.data)}")
+                    print(f"  Frames with annotations: {total_frames_with_annotations}/{len(self.mrc_files)}")
+                    for frame, count in sorted(frame_counts.items()):
+                        if frame < len(self.mrc_files):
+                            print(f"    Frame {frame} ({Path(self.mrc_files[frame]).name}): {count} annotations")
                 
                 # Save to file
                 np.save(filename, annotations, allow_pickle=True)
                 self.viewer.status = f'Saved {len(self.shapes_layer.data)} annotations to {filename}'
-                print(f"Annotations saved to {filename}")
+                print(f"\nAnnotations saved to {filename}")
             else:
                 self.viewer.status = 'No annotations to save'
         
         # Add widgets to viewer
         self.viewer.window.add_dock_widget(filter_controls, area='right', name='Filter Controls')
         self.viewer.window.add_dock_widget(annotation_controls, area='right', name='Save Annotations')
+        # self.viewer.window.add_dock_widget(load_annotations, area='right', name='Load Annotations') # Claude forgot to define this function
         
         # Add usage instructions
         instructions = """
@@ -477,22 +518,36 @@ class CryoEMFibrilAnnotator:
         1. Use slider to adjust Butterworth lowpass filter (0 = no filter)
            - Resolution cutoff in Angstroms
            - Filter order controls sharpness (higher = sharper cutoff)
-        2. Select 'Fibril Annotations' layer
-        3. Press 'P' to activate path tool
-        4. Click along fibril to trace path
-        5. Press Enter to finish current path
-        6. Press Escape to cancel current path
-        7. Use 'A' for selection tool to edit
-        8. Save annotations when done
+        
+        2. Select 'Fibril Annotations' layer in the layer list
+        
+        3. Annotation tools:
+           - Press 'L' for line tool (straight fibril segments)
+           - Press 'Shift+L' for polyline tool (multi-segment fibrils)
+           - Click to set start point, click again for end point
+           - For polylines: keep clicking to add segments, double-click or Enter to finish
+        
+        4. Editing tools:
+           - Press 'A' for selection tool to edit/delete annotations
+           - Press 'D' to delete selected annotations
+           - Press Escape to cancel current annotation
+           - Press 'M' for pan/zoom mode
+        
+        5. Save/Load:
+           - Use 'Save Annotations' to export your work
+           - Use 'Load Annotations' to restore previous work -> NOT YET IMPLEMENTED! #TODO
         
         Navigation:
         - Scroll: zoom in/out
-        - Click+drag: pan
-        - Slider at bottom: navigate stack
+        - Click+drag: pan (when in pan mode 'M')
+        - Slider at bottom: navigate between micrographs
+        - Arrow keys: fine navigation between frames
+        
+        Note: Each micrograph has its own independent annotations
         """
         
         print(instructions)
-        self.viewer.status = "Ready for annotation. Press 'P' to start drawing fibrils."
+        self.viewer.status = "Ready for annotation. Press 'L' for lines or 'Shift+L' for polylines to trace fibrils."
         
         # Start viewer
         napari.run()

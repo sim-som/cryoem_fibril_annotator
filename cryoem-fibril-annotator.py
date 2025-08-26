@@ -562,21 +562,24 @@ def main():
     import argparse
     
     parser = argparse.ArgumentParser(description='Annotate fibrils in cryo-EM micrographs')
-    parser.add_argument('input', nargs='+', help='MRC file(s) or pattern (e.g., "*.mrc")')
+    # micrograph mrc files:
+    parser.add_argument('mic_dir', help='Location of MRC micrographs')
+    parser.add_argument('--glob_pattern', default="*.mrc", help='Search pattern (default: "*.mrc")')
+
+    
+
     parser.add_argument('--pixel-size', type=float, default=None,
                        help='Pixel size in Angstroms (if not in MRC header)')
     parser.add_argument('--permissive', action='store_true',
                        help='Force permissive mode for corrupted MRC files (use with caution)')
     
     args = parser.parse_args()
+    mic_dir = Path(args.mic_dir)
+    assert mic_dir.exists()
+    assert mic_dir.is_dir()
     
-    # Expand file patterns
-    mrc_files = []
-    for pattern in args.input:
-        if '*' in pattern or '?' in pattern:
-            mrc_files.extend(glob(pattern))
-        else:
-            mrc_files.append(pattern)
+    # Get list of micrograph mrc files:
+    mrc_files = [f for f in mic_dir.glob(args.glob_pattern)]
     
     if not mrc_files:
         print("Error: No MRC files found!")

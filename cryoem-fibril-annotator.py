@@ -25,10 +25,76 @@ from collections import Counter
 warnings.filterwarnings('ignore', category=FutureWarning)
 
 
+# Integrated functions from cryoem-file-finder.py
+def find_corresponding_file(
+    input_file: str, 
+    target_folder: str, 
+    micrograph_suffixes: List[str] = None,
+    power_spectrum_suffixes: List[str] = None
+) -> Optional[str]:
+    """
+    Find the corresponding cryo-EM data file between micrographs and power spectra.
+    """
+    if micrograph_suffixes is None:
+        micrograph_suffixes = [
+            '_doseweighted.mrc',
+            '_aligned.mrc', 
+            '_motion_corrected.mrc',
+            '_patch_aligned_doseweighted.mrc',
+            '_fractions_patch_aligned_doseweighted.mrc'
+        ]
+    
+    if power_spectrum_suffixes is None:
+        power_spectrum_suffixes = [
+            '_ctf_diag_2D.mrc',
+            '_ctf_2D.mrc',
+            '_power_spectrum.mrc',
+            '_ps.mrc',
+            '_ctf_diag.mrc'
+        ]
+    
+    input_path = Path(input_file)
+    input_name = input_path.name
+    target_path = Path(target_folder)
+    
+    if not target_path.exists():
+        return None
+    
+    # Determine input file type and extract base name
+    base_name = None
+    target_suffixes = []
+    
+    # Check if input is a micrograph
+    for suffix in micrograph_suffixes:
+        if input_name.endswith(suffix):
+            base_name = input_name[:-len(suffix)]
+            target_suffixes = power_spectrum_suffixes
+            break
+    
+    # Check if input is a power spectrum
+    if base_name is None:
+        for suffix in power_spectrum_suffixes:
+            if input_name.endswith(suffix):
+                base_name = input_name[:-len(suffix)]
+                target_suffixes = micrograph_suffixes
+                break
+    
+    if base_name is None:
+        return None
+    
+    # Search for corresponding file with any of the target suffixes
+    for suffix in target_suffixes:
+        candidate_file = target_path / (base_name + suffix)
+        if candidate_file.exists():
+            return str(candidate_file)
+    
+    return None
+
+
 class CryoEMFibrilAnnotator:
     """Main class for cryo-EM fibril annotation with interactive filtering."""
     
-    def __init__(self, mrc_files: List[str], pixel_size: float = None):
+    def __init__(self, mrc_files: List[str], pixel_size: float = None, ps_files: List[str] = None):
         """
         Initialize the annotator.
         
@@ -38,14 +104,19 @@ class CryoEMFibrilAnnotator:
             List of paths to MRC files
         pixel_size : float, optional
             Pixel size in Angstroms. If None, will try to read from MRC header
+        ps_files : List[str], optional
+            List of paths to power spectrum MRC files
         """
         self.mrc_files = sorted(mrc_files)
+        self.ps_files = sorted(ps_files) if ps_files else None
         self.pixel_size = pixel_size
         self.viewer = None
         self.image_layer = None
         self.filtered_layer = None
+        self.ps_layer = None  # Power spectrum layer
         self.shapes_layer = None
         self.original_stack = None
+        self.ps_stack = None  # Power spectrum stack
         self.current_filter_threshold = None
         self.filter_order = 4  # Default Butterworth filter order
         self.force_permissive = False  # Whether to force permissive mode
@@ -202,6 +273,55 @@ class CryoEMFibrilAnnotator:
         
         return stack, pixel_size
     
+    def create_ps_stack(self) -> Tuple[Optional[da.Array], float]:
+        """
+        Create a lazy stack from all power spectrum MRC files.
+        
+        Returns
+        -------
+        stack : dask.array or None
+            Lazy stack of all power spectra, or None if no PS files
+        pixel_size : float
+            Pixel size in Angstroms (from micrographs)
+        """
+        if not self.ps_files:
+            return None, self.pixel_size
+            
+        arrays = []
+        valid_files = []
+        
+        print(f"Loading {len(self.ps_files)} power spectrum files...")
+        
+        for filepath in self.ps_files:
+            arr, _ = self.load_mrc_lazy(filepath)  # Ignore PS pixel size, use micrograph pixel size
+            if arr is not None:
+                arrays.append(arr)
+                valid_files.append(filepath)
+            else:
+                print(f"Skipped PS: {filepath}")
+        
+        if not arrays:
+            print("Warning: No valid power spectrum files could be loaded!")
+            return None, self.pixel_size
+        
+        print(f"Successfully loaded {len(arrays)} out of {len(self.ps_files)} PS files")
+        
+        # Update the PS file list to only include valid files
+        self.ps_files = valid_files
+        
+        # Concatenate along first axis
+        stack = da.concatenate(arrays, axis=0)
+        
+        # If individual files were 2D, squeeze the extra dimension
+        if stack.ndim == 4 and stack.shape[1] == 1:
+            stack = stack.squeeze(axis=1)
+        
+        print(f"PS Stack shape: {stack.shape}")
+        print(f"PS Stack dtype: {stack.dtype}")
+        print(f"PS Estimated size: {stack.nbytes / 1e9:.2f} GB")
+        
+        return stack, self.pixel_size
+    
     def create_filtered_stack_lazy(self, threshold_angstrom: float, order: int = 4) -> da.Array:
         """
         Create a lazy filtered version of the stack using Dask.
@@ -220,6 +340,7 @@ class CryoEMFibrilAnnotator:
         """
         def filter_wrapper(block, block_id=None):
             """Wrapper to apply filter to each 2D slice in a block."""
+            _ = block_id  # Unused parameter
             # Store original dtype
             original_dtype = block.dtype
             
@@ -368,6 +489,13 @@ class CryoEMFibrilAnnotator:
         # Create lazy stack
         self.original_stack, self.pixel_size = self.create_stack()
         
+        # Create power spectrum stack if available
+        if self.ps_files:
+            print(f"Loading power spectra for {len(self.ps_files)} files...")
+            self.ps_stack, _ = self.create_ps_stack()
+        else:
+            print("No power spectrum files provided")
+        
         # Initialize viewer
         self.viewer = napari.Viewer(title='Cryo-EM Fibril Annotator')
         
@@ -407,6 +535,39 @@ class CryoEMFibrilAnnotator:
             contrast_limits=(contrast_min, contrast_max)
         )
         
+        # Add power spectrum layer if available
+        if self.ps_stack is not None:
+            # Calculate contrast limits for power spectrum
+            print("Calculating power spectrum contrast limits...")
+            first_ps = self.ps_stack[0].compute()
+            
+            # Convert to float32 for percentile calculation
+            if first_ps.dtype == np.float16:
+                first_ps_f32 = first_ps.astype(np.float32)
+            else:
+                first_ps_f32 = first_ps
+            
+            # Power spectra often have high dynamic range, use more conservative percentiles
+            ps_contrast_min = float(np.percentile(first_ps_f32, 5))
+            ps_contrast_max = float(np.percentile(first_ps_f32, 95))
+            
+            # Handle edge cases
+            if np.isnan(ps_contrast_min) or np.isnan(ps_contrast_max) or ps_contrast_min == ps_contrast_max:
+                ps_contrast_min = float(np.min(first_ps_f32))
+                ps_contrast_max = float(np.max(first_ps_f32))
+            
+            print(f"Power spectrum contrast limits: [{ps_contrast_min:.2f}, {ps_contrast_max:.2f}]")
+            
+            self.ps_layer = self.viewer.add_image(
+                self.ps_stack,
+                name='Power Spectra',
+                colormap='viridis',  # Different colormap for distinction
+                contrast_limits=(ps_contrast_min, ps_contrast_max),
+                visible=False  # Start hidden
+            )
+            
+            print(f"Added power spectrum layer with {len(self.ps_files)} files")
+        
         # Add shapes layer for annotations
         fibril_width = 200
         if self.pixel_size:
@@ -433,6 +594,23 @@ class CryoEMFibrilAnnotator:
                 edge_width=fibril_width,
                 face_color='transparent'
             )
+        
+        # Create display control widget
+        @magicgui(
+            auto_call=True,
+            show_power_spectra={'widget_type': 'CheckBox',
+                               'value': False,
+                               'label': 'Show Power Spectra',
+                               'tooltip': 'Toggle power spectrum display'}
+        )
+        def display_controls(show_power_spectra: bool = False):
+            """Control panel for display options."""
+            if self.ps_layer is not None:
+                self.ps_layer.visible = show_power_spectra
+                if show_power_spectra:
+                    self.viewer.status = 'Power spectra visible'
+                else:
+                    self.viewer.status = 'Power spectra hidden'
         
         # Create filter control widget
         @magicgui(
@@ -511,6 +689,8 @@ class CryoEMFibrilAnnotator:
                 self.viewer.status = 'No annotations to save'
         
         # Add widgets to viewer
+        if self.ps_stack is not None:
+            self.viewer.window.add_dock_widget(display_controls, area='right', name='Display Controls')
         self.viewer.window.add_dock_widget(filter_controls, area='right', name='Filter Controls')
         self.viewer.window.add_dock_widget(annotation_controls, area='right', name='Save Annotations')
         # self.viewer.window.add_dock_widget(load_annotations, area='right', name='Load Annotations') # Claude forgot to define this function
@@ -519,25 +699,29 @@ class CryoEMFibrilAnnotator:
         instructions = """
         FIBRIL ANNOTATION INSTRUCTIONS:
         
-        1. Use slider to adjust Butterworth lowpass filter (0 = no filter)
+        1. Display Controls:
+           - Toggle 'Show Power Spectra' to view corresponding 2D power spectra
+           - Power spectra are automatically synchronized with micrograph navigation
+        
+        2. Use slider to adjust Butterworth lowpass filter (0 = no filter)
            - Resolution cutoff in Angstroms
            - Filter order controls sharpness (higher = sharper cutoff)
         
-        2. Select 'Fibril Annotations' layer in the layer list
+        3. Select 'Fibril Annotations' layer in the layer list
         
-        3. Annotation tools:
+        4. Annotation tools:
            - Press 'L' for line tool (straight fibril segments)
            - Press 'Shift+L' for polyline tool (multi-segment fibrils)
            - Click to set start point, click again for end point
            - For polylines: keep clicking to add segments, double-click or Enter to finish
         
-        4. Editing tools:
+        5. Editing tools:
            - Press 'A' for selection tool to edit/delete annotations
            - Press 'D' to delete selected annotations
            - Press Escape to cancel current annotation
            - Press 'M' for pan/zoom mode
         
-        5. Save/Load:
+        6. Save/Load:
            - Use 'Save Annotations' to export your work
            - Use 'Load Annotations' to restore previous work -> NOT YET IMPLEMENTED! #TODO
         
@@ -546,6 +730,7 @@ class CryoEMFibrilAnnotator:
         - Click+drag: pan (when in pan mode 'M')
         - Slider at bottom: navigate between micrographs
         - Arrow keys: fine navigation between frames
+        - Power spectra automatically follow micrograph navigation
         
         Note: Each micrograph has its own independent annotations
         """
@@ -601,23 +786,56 @@ def main():
     print(f"Found {len(mic_files)} MRC files")
 
     # if given get list of 2D powerspectra files:
+    ps_files = None
     if args.ps_dir:
         ps_dir = Path(args.ps_dir)
-        ps_files = [f for f in ps_dir.glob(args.ps_glob)]
-
-        assert len(ps_files) == len(mic_files)
-
-        # Check files exist
-        ps_files = [f for f in ps_files if Path(f).exists()]
-        if not ps_files:
-            print("Error: No valid MRC files found!")
-            sys.exit(1)
-        
-        print(f"Also found {len(ps_files)} in {ps_dir}")
+        if not ps_dir.exists() or not ps_dir.is_dir():
+            print(f"Warning: Power spectrum directory {ps_dir} does not exist or is not a directory")
+            print("Continuing without power spectra...")
+        else:
+            # Try to find corresponding power spectrum files
+            ps_files = []
+            missing_ps = []
+            
+            for mic_file in mic_files:
+                corresponding_ps = find_corresponding_file(str(mic_file), str(ps_dir))
+                if corresponding_ps and Path(corresponding_ps).exists():
+                    ps_files.append(corresponding_ps)
+                else:
+                    missing_ps.append(mic_file)
+                    # Try direct glob pattern match as fallback
+                    ps_candidates = [f for f in ps_dir.glob(args.ps_glob)]
+                    # Find PS file with matching base name
+                    mic_base = Path(mic_file).stem
+                    for candidate in ps_candidates:
+                        if mic_base.split('_fractions')[0] in candidate.stem:
+                            ps_files.append(str(candidate))
+                            missing_ps.pop()
+                            break
+            
+            if len(ps_files) != len(mic_files):
+                print(f"Warning: Found {len(ps_files)} power spectra for {len(mic_files)} micrographs")
+                if missing_ps:
+                    print(f"Missing power spectra for {len(missing_ps)} micrographs:")
+                    for missing in missing_ps[:5]:  # Show first 5
+                        print(f"  {Path(missing).name}")
+                    if len(missing_ps) > 5:
+                        print(f"  ... and {len(missing_ps) - 5} more")
+                
+                # Only use matching pairs
+                if len(ps_files) > 0:
+                    print(f"Using {len(ps_files)} matched micrograph-power spectrum pairs")
+                    # Truncate mic_files to match ps_files length
+                    mic_files = mic_files[:len(ps_files)]
+                else:
+                    print("No matching power spectra found, continuing without power spectra")
+                    ps_files = None
+            else:
+                print(f"Found matching power spectra for all {len(ps_files)} micrographs")
 
     
     # Create and run annotator
-    annotator = CryoEMFibrilAnnotator(mic_files, pixel_size=args.pixel_size)
+    annotator = CryoEMFibrilAnnotator(mic_files, pixel_size=args.pixel_size, ps_files=ps_files)
     
     # Set permissive mode if requested
     if args.permissive:

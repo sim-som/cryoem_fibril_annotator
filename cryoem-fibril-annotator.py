@@ -564,12 +564,12 @@ def main():
     parser = argparse.ArgumentParser(description='Annotate fibrils in cryo-EM micrographs')
     # micrograph mrc files:
     parser.add_argument('mic_dir', help='Location of MRC micrographs')
-    parser.add_argument('--glob_pattern', default="*.mrc", help='Search pattern (default: "*.mrc")')
+    parser.add_argument('--glob_pattern', default="*_fractions_patch_aligned_doseweighted.mrc", help='Search pattern (default: "*_fractions_patch_aligned_doseweighted.mrc")')
+    # TODO add option to select commond file endings (*.mrc, *_fracitions.mrc, etc.)
 
     # Optional: Add location of 2D powerspectra, that were already calculated during CTF estimation / preproscessing:
-    parser.add_argument("--ps_dir", default=None, help="Directory path with precalculated 2D powerspectra")
-
-
+    parser.add_argument("--ps_dir", default=None, help="Directory path with precalculated 2D powerspectra (optinal but helpful for amyloid fibril picking)")
+    parser.add_argument("--ps_glob", default="*_ctf_diag_2D.mrc", help='Search pattern for 2D powerspectra files (default: "*_ctf_diag_2D.mrc")')
 
     parser.add_argument('--pixel-size', type=float, default=None,
                        help='Pixel size in Angstroms (if not in MRC header)')
@@ -582,22 +582,38 @@ def main():
     assert mic_dir.is_dir()
     
     # Get list of micrograph mrc files:
-    mrc_files = [f for f in mic_dir.glob(args.glob_pattern)]
+    mic_files = [f for f in mic_dir.glob(args.glob_pattern)]
     
-    if not mrc_files:
+    if not mic_files:
         print("Error: No MRC files found!")
         sys.exit(1)
     
     # Check files exist
-    mrc_files = [f for f in mrc_files if Path(f).exists()]
-    if not mrc_files:
+    mic_files = [f for f in mic_files if Path(f).exists()]
+    if not mic_files:
         print("Error: No valid MRC files found!")
         sys.exit(1)
     
-    print(f"Found {len(mrc_files)} MRC files")
+    print(f"Found {len(mic_files)} MRC files")
+
+    # if given get list of 2D powerspectra files:
+    if args.ps_dir:
+        ps_dir = Path(args.ps_dir)
+        ps_files = [f for f in ps_dir.glob(args.ps_glob)]
+
+        assert len(ps_files) == len(mic_files)
+
+        # Check files exist
+        ps_files = [f for f in ps_files if Path(f).exists()]
+        if not ps_files:
+            print("Error: No valid MRC files found!")
+            sys.exit(1)
+        
+        print(f"Also found {len(ps_files)} in {ps_dir}")
+
     
     # Create and run annotator
-    annotator = CryoEMFibrilAnnotator(mrc_files, pixel_size=args.pixel_size)
+    annotator = CryoEMFibrilAnnotator(mic_files, pixel_size=args.pixel_size)
     
     # Set permissive mode if requested
     if args.permissive:

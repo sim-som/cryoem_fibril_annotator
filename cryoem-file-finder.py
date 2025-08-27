@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import os
 from pathlib import Path
 from typing import Optional, Tuple, List
@@ -205,9 +206,18 @@ if __name__ == "__main__":
     print("for mic, ps in pairs:")
     print("    print(f'Micrograph: {mic} <-> Power Spectrum: {ps}')")
 
-    mic_folder = Path("/home/simon/jureca_erc_CS_mount/jobs/SiSo/CS-aros-mutation/S1/motioncorrected")
+    #mic_folder = Path("/home/simon/jureca_erc_CS_mount/jobs/SiSo/CS-aros-mutation/S1/motioncorrected")
+    mic_folder = Path("/u2/wrk/simon/cryoEM_processing/Aros/Aros_sarkosyl_wash_slot3_Krios_K3_20250612/cs_mocorr_mics/mics")
 
     pairs = find_file_pairs(mic_folder, ctf_folder)
     for mic, ps in pairs:
         print(f'Micrograph: {mic} <-> Power Spectrum: {ps}')
+        print(f'Micrograph: {Path(mic).name} <-> Power Spectrum: {Path(ps).name}')
+
+    with open("ctf_files.txt", mode="w") as f:
+        for _, ps in pairs:
+            print(ps)
+            f.write(f"{ps}\n")
+
+
     

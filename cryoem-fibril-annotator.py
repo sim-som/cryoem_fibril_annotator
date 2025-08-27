@@ -566,7 +566,10 @@ def main():
     parser.add_argument('mic_dir', help='Location of MRC micrographs')
     parser.add_argument('--glob_pattern', default="*.mrc", help='Search pattern (default: "*.mrc")')
 
-    
+    # Optional: Add location of 2D powerspectra, that were already calculated during CTF estimation / preproscessing:
+    parser.add_argument("--ps_dir", default=None, help="Directory path with precalculated 2D powerspectra")
+
+
 
     parser.add_argument('--pixel-size', type=float, default=None,
                        help='Pixel size in Angstroms (if not in MRC header)')

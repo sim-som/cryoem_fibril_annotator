@@ -408,6 +408,10 @@ class CryoEMFibrilAnnotator:
         )
         
         # Add shapes layer for annotations
+        fibril_width = 200
+        if self.pixel_size:
+            fibril_width = fibril_width / self.pixel_size
+
         # Set ndim to match the image stack (3D if stack, 2D if single image)
         if len(self.original_stack.shape) > 2:
             # 3D stack - annotations are per frame
@@ -416,7 +420,7 @@ class CryoEMFibrilAnnotator:
                 ndim=3,  # This ensures annotations are per-frame
                 shape_type='line',  # Lines for fibril annotation
                 edge_color='red',
-                edge_width=2,
+                edge_width=fibril_width,
                 face_color='transparent'
             )
         else:
@@ -426,7 +430,7 @@ class CryoEMFibrilAnnotator:
                 ndim=2,
                 shape_type='line',
                 edge_color='red',
-                edge_width=2,
+                edge_width=fibril_width,
                 face_color='transparent'
             )
         

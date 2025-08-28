@@ -114,7 +114,8 @@ class CryoEMFibrilAnnotator:
         self.image_layer = None
         self.filtered_layer = None
         self.ps_layer = None  # Power spectrum layer
-        self.shapes_layer = None
+        self.shapes_layers = {}  # Dictionary to store multiple annotation layers
+        self.active_shapes_layer = None  # Currently active annotation layer
         self.original_stack = None
         self.ps_stack = None  # Power spectrum stack
         self.current_filter_threshold = None
@@ -375,6 +376,52 @@ class CryoEMFibrilAnnotator:
         
         return filtered
     
+    def create_annotation_layer(self, name: str, color: str = 'red') -> None:
+        """
+        Create a new annotation layer for a specific fibril type.
+        
+        Parameters
+        ----------
+        name : str
+            Name of the annotation layer
+        color : str
+            Color for the annotations (default: 'red')
+        """
+        if name in self.shapes_layers:
+            print(f"Warning: Layer '{name}' already exists")
+            return
+            
+        # Calculate fibril width
+        fibril_width = 200
+        if self.pixel_size:
+            fibril_width = fibril_width / self.pixel_size
+
+        # Set ndim to match the image stack (3D if stack, 2D if single image)
+        if len(self.original_stack.shape) > 2:
+            # 3D stack - annotations are per frame
+            shapes_layer = self.viewer.add_shapes(
+                name=f'{name} Annotations',
+                ndim=3,  # This ensures annotations are per-frame
+                shape_type='line',  # Lines for fibril annotation
+                edge_color=color,
+                edge_width=fibril_width,
+                face_color='transparent'
+            )
+        else:
+            # Single 2D image
+            shapes_layer = self.viewer.add_shapes(
+                name=f'{name} Annotations',
+                ndim=2,
+                shape_type='line',
+                edge_color=color,
+                edge_width=fibril_width,
+                face_color='transparent'
+            )
+        
+        self.shapes_layers[name] = shapes_layer
+        self.active_shapes_layer = shapes_layer
+        print(f"Created annotation layer: {name}")
+    
     def apply_lowpass_filter(self, image: np.ndarray, threshold_angstrom: float, order: int = 4) -> np.ndarray:
         """
         Apply Butterworth lowpass filter to image.
@@ -568,32 +615,8 @@ class CryoEMFibrilAnnotator:
             
             print(f"Added power spectrum layer with {len(self.ps_files)} files")
         
-        # Add shapes layer for annotations
-        fibril_width = 200
-        if self.pixel_size:
-            fibril_width = fibril_width / self.pixel_size
-
-        # Set ndim to match the image stack (3D if stack, 2D if single image)
-        if len(self.original_stack.shape) > 2:
-            # 3D stack - annotations are per frame
-            self.shapes_layer = self.viewer.add_shapes(
-                name='Fibril Annotations',
-                ndim=3,  # This ensures annotations are per-frame
-                shape_type='line',  # Lines for fibril annotation
-                edge_color='red',
-                edge_width=fibril_width,
-                face_color='transparent'
-            )
-        else:
-            # Single 2D image
-            self.shapes_layer = self.viewer.add_shapes(
-                name='Fibril Annotations',
-                ndim=2,
-                shape_type='line',
-                edge_color='red',
-                edge_width=fibril_width,
-                face_color='transparent'
-            )
+        # Create default annotation layer
+        self.create_annotation_layer('Default', 'red')
         
         # Create display control widget
         @magicgui(
@@ -646,7 +669,7 @@ class CryoEMFibrilAnnotator:
                      'label': 'Load from:'}
         )
         def load_annotations(filename: Path = Path('fibril_annotations.npy')):
-            """Load annotations from file."""
+            """Load annotations from file into a new layer."""
             try:
                 if not filename.exists():
                     self.viewer.status = f'File not found: {filename}'
@@ -678,21 +701,36 @@ class CryoEMFibrilAnnotator:
                 if loaded_ndim != expected_ndim:
                     self.viewer.status = f'Dimension mismatch: expected {expected_ndim}D, loaded {loaded_ndim}D'
                     return
-                
-                # Clear existing annotations
-                if self.shapes_layer is not None:
-                    self.shapes_layer.data = []
                     
                 # Load the shapes data
                 shapes_data = annotations['shapes']
                 
                 if len(shapes_data) > 0:
+                    # Determine layer name and color
+                    layer_name = annotations.get('layer_name', f'Loaded_{filename.stem}')
+                    edge_color = annotations.get('edge_color', 'blue')  # Default to blue for loaded layers
+                    
+                    # Remove ' Annotations' suffix if present to avoid duplication
+                    if layer_name.endswith(' Annotations'):
+                        layer_name = layer_name[:-12]
+                    
+                    # Create unique layer name if it already exists
+                    original_layer_name = layer_name
+                    counter = 1
+                    while layer_name in self.shapes_layers:
+                        layer_name = f"{original_layer_name}_{counter}"
+                        counter += 1
+                    
+                    # Create new annotation layer
+                    self.create_annotation_layer(layer_name, edge_color)
+                    new_layer = self.shapes_layers[layer_name]
+                    
                     # Set the annotation data
-                    self.shapes_layer.data = shapes_data
+                    new_layer.data = shapes_data
                     
                     # Load properties if available
                     if 'properties' in annotations and annotations['properties']:
-                        self.shapes_layer.properties = annotations['properties']
+                        new_layer.properties = annotations['properties']
                     
                     # Print summary for 3D annotations
                     if loaded_ndim == 3 and 'frame_indices' in annotations:
@@ -700,20 +738,52 @@ class CryoEMFibrilAnnotator:
                         frame_counts = Counter(frame_indices)
                         total_frames_with_annotations = len(frame_counts)
                         
-                        print(f"Loaded annotations summary:")
+                        print(f"Loaded annotations summary for {layer_name}:")
                         print(f"  Total annotations: {len(shapes_data)}")
                         print(f"  Frames with annotations: {total_frames_with_annotations}")
                         for frame, count in sorted(frame_counts.items()):
                             if frame < len(self.mrc_files):
                                 print(f"    Frame {frame} ({Path(self.mrc_files[frame]).name}): {count} annotations")
                     
-                    self.viewer.status = f'Loaded {len(shapes_data)} annotations from {filename}'
-                    print(f"Successfully loaded {len(shapes_data)} annotations from {filename}")
+                    self.viewer.status = f'Loaded {len(shapes_data)} annotations into new layer: {layer_name}'
+                    print(f"Successfully loaded {len(shapes_data)} annotations into layer: {layer_name}")
                 else:
                     self.viewer.status = f'No annotations found in {filename}'
                     
             except Exception as e:
                 error_msg = f'Error loading annotations: {str(e)}'
+                self.viewer.status = error_msg
+                print(error_msg)
+        
+        # Create layer management widget
+        @magicgui(
+            call_button='Create New Layer',
+            layer_name={'widget_type': 'LineEdit',
+                       'value': 'Aβ42',
+                       'label': 'Layer Name:'},
+            layer_color={'widget_type': 'ComboBox',
+                        'choices': ['red', 'green', 'blue', 'cyan', 'magenta', 'yellow', 'orange', 'purple'],
+                        'value': 'green',
+                        'label': 'Color:'}
+        )
+        def layer_management(layer_name: str = 'Aβ42', layer_color: str = 'green'):
+            """Create a new annotation layer for a specific fibril type."""
+            if not layer_name.strip():
+                self.viewer.status = 'Please enter a layer name'
+                return
+                
+            layer_name = layer_name.strip()
+            
+            if layer_name in self.shapes_layers:
+                self.viewer.status = f'Layer "{layer_name}" already exists'
+                return
+                
+            try:
+                self.create_annotation_layer(layer_name, layer_color)
+                self.viewer.status = f'Created new annotation layer: {layer_name} ({layer_color})'
+                print(f"Created new annotation layer: {layer_name} with color {layer_color}")
+            except Exception as e:
+                error_msg = f'Error creating layer: {str(e)}'
                 self.viewer.status = error_msg
                 print(error_msg)
         
@@ -726,23 +796,40 @@ class CryoEMFibrilAnnotator:
                      'label': 'Save to:'}
         )
         def annotation_controls(filename: Path = Path('fibril_annotations.npy')):
-            """Save annotations to file."""
-            if self.shapes_layer is not None and len(self.shapes_layer.data) > 0:
+            """Save annotations from the currently selected layer to file."""
+            # Find the currently selected shapes layer
+            selected_layer = None
+            layer_name = None
+            
+            for layer in self.viewer.layers:
+                if hasattr(layer, 'selected') and layer.selected and hasattr(layer, 'data') and hasattr(layer, 'shape_type'):
+                    selected_layer = layer
+                    layer_name = layer.name
+                    break
+            
+            # If no layer is selected, use the active shapes layer
+            if selected_layer is None and self.active_shapes_layer is not None:
+                selected_layer = self.active_shapes_layer
+                layer_name = selected_layer.name
+            
+            if selected_layer is not None and len(selected_layer.data) > 0:
                 # Get annotation data
                 annotations = {
-                    'shapes': self.shapes_layer.data,
-                    'shape_types': self.shapes_layer.shape_type,
-                    'properties': self.shapes_layer.properties,  # Any additional properties
+                    'shapes': selected_layer.data,
+                    'shape_types': selected_layer.shape_type,
+                    'properties': selected_layer.properties,  # Any additional properties
                     'pixel_size': self.pixel_size,
                     'mrc_files': self.mrc_files,
-                    'ndim': self.shapes_layer.ndim,  # Important for reloading
+                    'ndim': selected_layer.ndim,  # Important for reloading
+                    'layer_name': layer_name,  # Store the layer name
+                    'edge_color': selected_layer.edge_color,  # Store the color
                 }
                 
                 # For 3D annotations, include frame information
-                if self.shapes_layer.ndim == 3:
+                if selected_layer.ndim == 3:
                     # Extract which frame each annotation belongs to
                     frame_indices = []
-                    for shape in self.shapes_layer.data:
+                    for shape in selected_layer.data:
                         # First coordinate is the frame index in 3D
                         if len(shape) > 0:
                             frame_idx = int(shape[0, 0])  # z-coordinate
@@ -754,8 +841,8 @@ class CryoEMFibrilAnnotator:
                     frame_counts = Counter(frame_indices)
                     total_frames_with_annotations = len(frame_counts)
                     
-                    print(f"Annotations summary:")
-                    print(f"  Total annotations: {len(self.shapes_layer.data)}")
+                    print(f"Annotations summary for {layer_name}:")
+                    print(f"  Total annotations: {len(selected_layer.data)}")
                     print(f"  Frames with annotations: {total_frames_with_annotations}/{len(self.mrc_files)}")
                     for frame, count in sorted(frame_counts.items()):
                         if frame < len(self.mrc_files):
@@ -763,8 +850,8 @@ class CryoEMFibrilAnnotator:
                 
                 # Save to file
                 np.save(filename, annotations, allow_pickle=True)
-                self.viewer.status = f'Saved {len(self.shapes_layer.data)} annotations to {filename}'
-                print(f"\nAnnotations saved to {filename}")
+                self.viewer.status = f'Saved {len(selected_layer.data)} annotations from {layer_name} to {filename}'
+                print(f"\nAnnotations from {layer_name} saved to {filename}")
             else:
                 self.viewer.status = 'No annotations to save'
         
@@ -772,6 +859,7 @@ class CryoEMFibrilAnnotator:
         if self.ps_stack is not None:
             self.viewer.window.add_dock_widget(display_controls, area='right', name='Display Controls')
         self.viewer.window.add_dock_widget(filter_controls, area='right', name='Filter Controls')
+        self.viewer.window.add_dock_widget(layer_management, area='right', name='Layer Management')
         self.viewer.window.add_dock_widget(load_annotations, area='right', name='Load Annotations')
         self.viewer.window.add_dock_widget(annotation_controls, area='right', name='Save Annotations')
         
@@ -787,7 +875,11 @@ class CryoEMFibrilAnnotator:
            - Resolution cutoff in Angstroms
            - Filter order controls sharpness (higher = sharper cutoff)
         
-        3. Select 'Fibril Annotations' layer in the layer list
+        3. Layer Management:
+           - Use 'Layer Management' to create new annotation layers for different fibril types
+           - Default suggestions: Aβ42, Tau, α-synuclein, etc.
+           - Each layer can have a different color for easy identification
+           - Select the appropriate layer in the layer list before annotating
         
         4. Annotation tools:
            - Press 'L' for line tool (straight fibril segments)
@@ -802,8 +894,10 @@ class CryoEMFibrilAnnotator:
            - Press 'M' for pan/zoom mode
         
         6. Save/Load:
-           - Use 'Save Annotations' to export your work
-           - Use 'Load Annotations' to restore previous work
+           - Use 'Save Annotations' to export the currently selected layer
+           - Each layer should be saved to a separate .npy file (e.g., Ab42_annotations.npy, Tau_annotations.npy)
+           - Use 'Load Annotations' to load annotations into a new layer
+           - Loading preserves the original layer name and color from the file
         
         Navigation:
         - Scroll: zoom in/out
@@ -812,7 +906,8 @@ class CryoEMFibrilAnnotator:
         - Arrow keys: fine navigation between frames
         - Power spectra automatically follow micrograph navigation
         
-        Note: Each micrograph has its own independent annotations
+        Note: Each micrograph has its own independent annotations for each layer
+        Multiple annotation layers allow you to classify different fibril types
         """
         
         print(instructions)

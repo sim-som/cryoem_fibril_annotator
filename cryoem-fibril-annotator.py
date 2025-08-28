@@ -801,18 +801,24 @@ class CryoEMFibrilAnnotator:
             selected_layer = None
             layer_name = None
             
-            for layer in self.viewer.layers:
-                if hasattr(layer, 'selected') and layer.selected and hasattr(layer, 'data') and hasattr(layer, 'shape_type'):
-                    selected_layer = layer
-                    layer_name = layer.name
-                    break
+            # Check if there are any selected layers in the layer list
+            if len(self.viewer.layers.selection) > 0:
+                # Get the first selected layer
+                for layer in self.viewer.layers.selection:
+                    # Check if it's a shapes layer (has shape_type attribute)
+                    if hasattr(layer, 'shape_type') and hasattr(layer, 'data'):
+                        selected_layer = layer
+                        layer_name = layer.name
+                        break
             
-            # If no layer is selected, use the active shapes layer
+            # If no shapes layer is selected, use the active shapes layer as fallback
             if selected_layer is None and self.active_shapes_layer is not None:
                 selected_layer = self.active_shapes_layer
                 layer_name = selected_layer.name
+                print("No layer selected, using active layer as fallback")
             
             if selected_layer is not None and len(selected_layer.data) > 0:
+                print(f"Saving layer: {layer_name} with {len(selected_layer.data)} annotations")
                 # Get annotation data
                 annotations = {
                     'shapes': selected_layer.data,
@@ -853,7 +859,12 @@ class CryoEMFibrilAnnotator:
                 self.viewer.status = f'Saved {len(selected_layer.data)} annotations from {layer_name} to {filename}'
                 print(f"\nAnnotations from {layer_name} saved to {filename}")
             else:
-                self.viewer.status = 'No annotations to save'
+                if selected_layer is None:
+                    self.viewer.status = 'No annotation layer selected. Please select a shapes layer in the layer list.'
+                    print("No annotation layer selected for saving")
+                else:
+                    self.viewer.status = 'Selected layer has no annotations to save'
+                    print(f"Layer {layer_name} has no annotations to save")
         
         # Add widgets to viewer
         if self.ps_stack is not None:

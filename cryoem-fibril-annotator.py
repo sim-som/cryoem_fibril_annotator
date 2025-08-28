@@ -21,6 +21,7 @@ from skimage.filters import butterworth
 from glob import glob
 import sys
 from collections import Counter
+from tqdm import tqdm
 
 warnings.filterwarnings('ignore', category=FutureWarning)
 
@@ -122,7 +123,7 @@ class CryoEMFibrilAnnotator:
         self.filter_order = 4  # Default Butterworth filter order
         self.force_permissive = False  # Whether to force permissive mode
         
-    def load_mrc_lazy(self, filepath: str) -> Tuple[Optional[da.Array], float]:
+    def load_mrc_lazy(self, filepath: str, shape:Tuple, dtype) -> Tuple[Optional[da.Array], float]:
         """
         Lazily load a single MRC file.
         
@@ -140,51 +141,7 @@ class CryoEMFibrilAnnotator:
         """
         # Determine whether to use permissive mode
         use_permissive = self.force_permissive
-        
-        try:
-            # First try to open with chosen mode
-            with mrcfile.open(filepath, mode='r', permissive=use_permissive) as mrc:
-                if mrc.data is None:
-                    print(f"Warning: No data in {filepath}, skipping")
-                    return None, 1.0
-                    
-                shape = mrc.data.shape
-                dtype = mrc.data.dtype
                 
-                # Try to get pixel size from header
-                if self.pixel_size is None:
-                    voxel_size = mrc.voxel_size
-                    if voxel_size.x > 0:
-                        pixel_size = float(voxel_size.x)
-                    else:
-                        print(f"Warning: Could not read pixel size from {filepath}, using 1.0 Å")
-                        pixel_size = 1.0  # Default to 1 Angstrom
-                else:
-                    pixel_size = self.pixel_size
-                    
-        except Exception as e:
-            if not use_permissive:
-                # Try with permissive mode as fallback
-                try:
-                    print(f"Warning: Standard MRC read failed for {filepath}: {e}")
-                    print(f"Trying permissive mode...")
-                    with mrcfile.open(filepath, mode='r', permissive=True) as mrc:
-                        if mrc.data is None:
-                            print(f"Error: Could not read data from {filepath}, skipping")
-                            return None, 1.0
-                            
-                        shape = mrc.data.shape
-                        dtype = mrc.data.dtype
-                        pixel_size = self.pixel_size if self.pixel_size else 1.0
-                        use_permissive = True  # Remember to use permissive for loading
-                        
-                except Exception as e2:
-                    print(f"Error: Could not read {filepath}: {e2}, skipping")
-                    return None, 1.0
-            else:
-                print(f"Error: Could not read {filepath} even in permissive mode: {e}, skipping")
-                return None, 1.0
-        
         @delayed
         def _load_mrc(path, permissive):
             try:
@@ -215,7 +172,7 @@ class CryoEMFibrilAnnotator:
         delayed_array = _load_mrc(filepath, use_permissive)
         lazy_array = da.from_delayed(delayed_array, shape=shape, dtype=dtype)
         
-        return lazy_array, pixel_size
+        return lazy_array 
     
     def create_stack(self) -> Tuple[da.Array, float]:
         """
@@ -229,16 +186,27 @@ class CryoEMFibrilAnnotator:
             Pixel size in Angstroms
         """
         arrays = []
-        pixel_sizes = []
         valid_files = []
+
+        # Get shape and dtype from first micrograph (assume this is constant for all micrographs)
+        with mrcfile.open(self.mrc_files[0]) as mrc:
+            mic_shape = mrc.data.shape
+            mic_dtype = mrc.data.dtype
+
+            # Also try to get pixel size from header:
+            if self.pixel_size is None:
+                voxel_size = mrc.voxel_size
+                if voxel_size.x > 0:
+                    pixel_size = float(voxel_size.x)
+                else:
+                    print(f"Warning: Could not read pixel size from {filepath}, using 1.0 Å")
+                    pixel_size = 1.0  # Default to 1 Angstrom 
         
-        print(f"Loading {len(self.mrc_files)} MRC files...")
-        
-        for filepath in self.mrc_files:
-            arr, pix_size = self.load_mrc_lazy(filepath)
+        # Iterate over all file paths and lazy read images as dask arrays:
+        for filepath in tqdm(self.mrc_files, desc=f"Loading {len(self.mrc_files)} MRC files..."):
+            arr = self.load_mrc_lazy(filepath, shape=mic_shape, dtype=mic_dtype)
             if arr is not None:
                 arrays.append(arr)
-                pixel_sizes.append(pix_size)
                 valid_files.append(filepath)
             else:
                 print(f"Skipped: {filepath}")
@@ -250,16 +218,6 @@ class CryoEMFibrilAnnotator:
         
         # Update the file list to only include valid files
         self.mrc_files = valid_files
-        
-        # Check if all pixel sizes are the same
-        if len(set(pixel_sizes)) > 1:
-            print("Warning: Different pixel sizes detected across files!")
-            print(f"Pixel sizes: {set(pixel_sizes)}")
-            pixel_size = pixel_sizes[0]
-            print(f"Using pixel size from first file: {pixel_size} Å")
-        else:
-            pixel_size = pixel_sizes[0]
-            print(f"Pixel size: {pixel_size} Å")
         
         # Concatenate along first axis
         stack = da.concatenate(arrays, axis=0)
@@ -290,11 +248,15 @@ class CryoEMFibrilAnnotator:
             
         arrays = []
         valid_files = []
-        
-        print(f"Loading {len(self.ps_files)} power spectrum files...")
-        
-        for filepath in self.ps_files:
-            arr, _ = self.load_mrc_lazy(filepath)  # Ignore PS pixel size, use micrograph pixel size
+
+        # Get shape and dtype from first powerspectrum (assume this is constant for all power spectrums)
+        with mrcfile.open(self.ps_files[0]) as mrc:
+            ps_shape = mrc.data.shape
+            ps_dtype = mrc.data.dtype
+            # (pixel size for powerspectra not relevant)
+
+        for filepath in tqdm(self.ps_files, desc=f"Loading {len(self.ps_files)} power spectrum files..."):
+            arr = self.load_mrc_lazy(filepath, shape=ps_shape, dtype=ps_dtype) 
             if arr is not None:
                 arrays.append(arr)
                 valid_files.append(filepath)
@@ -321,7 +283,7 @@ class CryoEMFibrilAnnotator:
         print(f"PS Stack dtype: {stack.dtype}")
         print(f"PS Estimated size: {stack.nbytes / 1e9:.2f} GB")
         
-        return stack, self.pixel_size
+        return stack
     
     def create_filtered_stack_lazy(self, threshold_angstrom: float, order: int = 4) -> da.Array:
         """
@@ -539,7 +501,7 @@ class CryoEMFibrilAnnotator:
         # Create power spectrum stack if available
         if self.ps_files:
             print(f"Loading power spectra for {len(self.ps_files)} files...")
-            self.ps_stack, _ = self.create_ps_stack()
+            self.ps_stack = self.create_ps_stack()
         else:
             print("No power spectrum files provided")
         
@@ -972,14 +934,18 @@ def main():
     assert mic_dir.is_dir()
     
     # Get list of micrograph mrc files:
+    print(f"Searching vor mics in {mic_dir}/{args.glob_pattern} ...")
     mic_files = [f for f in mic_dir.glob(args.glob_pattern)]
     
     if not mic_files:
         print("Error: No MRC files found!")
         sys.exit(1)
+
+    num_mics = len(mic_files)
+    print(f"Found {num_mics} micrographs")
     
     # Check files exist
-    mic_files = [f for f in mic_files if Path(f).exists()]
+    mic_files = [f for f in tqdm(mic_files, desc="Checking if files exist") if Path(f).exists()]
     if not mic_files:
         print("Error: No valid MRC files found!")
         sys.exit(1)

@@ -732,6 +732,21 @@ class CryoEMFibrilAnnotator:
                     if 'properties' in annotations and annotations['properties']:
                         new_layer.properties = annotations['properties']
                     
+                    # Ensure proper edge width for all loaded annotations
+                    # Calculate the proper fibril width
+                    fibril_width = 200
+                    if self.pixel_size:
+                        fibril_width = fibril_width / self.pixel_size
+                    
+                    # Set edge width for the layer (affects new annotations)
+                    new_layer.edge_width = fibril_width
+                    
+                    # Also update edge widths for all existing annotations
+                    if len(shapes_data) > 0:
+                        # Create edge_width array for all shapes
+                        edge_widths = [fibril_width] * len(shapes_data)
+                        new_layer.edge_width = edge_widths
+                    
                     # Print summary for 3D annotations
                     if loaded_ndim == 3 and 'frame_indices' in annotations:
                         frame_indices = annotations['frame_indices']

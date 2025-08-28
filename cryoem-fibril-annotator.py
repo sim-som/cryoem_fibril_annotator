@@ -637,6 +637,86 @@ class CryoEMFibrilAnnotator:
             else:
                 self.viewer.status = 'No filter applied'
         
+        # Create load annotations widget
+        @magicgui(
+            call_button='Load Annotations',
+            filename={'widget_type': 'FileEdit', 
+                     'mode': 'r',
+                     'value': 'fibril_annotations.npy',
+                     'label': 'Load from:'}
+        )
+        def load_annotations(filename: Path = Path('fibril_annotations.npy')):
+            """Load annotations from file."""
+            try:
+                if not filename.exists():
+                    self.viewer.status = f'File not found: {filename}'
+                    return
+                
+                # Load annotations data
+                annotations = np.load(filename, allow_pickle=True).item()
+                
+                if not isinstance(annotations, dict):
+                    self.viewer.status = 'Invalid annotation file format'
+                    return
+                
+                # Validate required fields
+                required_fields = ['shapes', 'pixel_size', 'mrc_files', 'ndim']
+                missing_fields = [field for field in required_fields if field not in annotations]
+                if missing_fields:
+                    self.viewer.status = f'Missing fields in annotation file: {missing_fields}'
+                    return
+                
+                # Check if pixel size matches (with tolerance)
+                loaded_pixel_size = annotations['pixel_size']
+                if self.pixel_size and abs(loaded_pixel_size - self.pixel_size) > 0.01:
+                    print(f"Warning: Pixel size mismatch! Current: {self.pixel_size} Å, Loaded: {loaded_pixel_size} Å")
+                    self.viewer.status = f'Warning: Pixel size mismatch (loaded: {loaded_pixel_size} Å)'
+                
+                # Check dimensionality compatibility
+                expected_ndim = 3 if len(self.original_stack.shape) > 2 else 2
+                loaded_ndim = annotations['ndim']
+                if loaded_ndim != expected_ndim:
+                    self.viewer.status = f'Dimension mismatch: expected {expected_ndim}D, loaded {loaded_ndim}D'
+                    return
+                
+                # Clear existing annotations
+                if self.shapes_layer is not None:
+                    self.shapes_layer.data = []
+                    
+                # Load the shapes data
+                shapes_data = annotations['shapes']
+                
+                if len(shapes_data) > 0:
+                    # Set the annotation data
+                    self.shapes_layer.data = shapes_data
+                    
+                    # Load properties if available
+                    if 'properties' in annotations and annotations['properties']:
+                        self.shapes_layer.properties = annotations['properties']
+                    
+                    # Print summary for 3D annotations
+                    if loaded_ndim == 3 and 'frame_indices' in annotations:
+                        frame_indices = annotations['frame_indices']
+                        frame_counts = Counter(frame_indices)
+                        total_frames_with_annotations = len(frame_counts)
+                        
+                        print(f"Loaded annotations summary:")
+                        print(f"  Total annotations: {len(shapes_data)}")
+                        print(f"  Frames with annotations: {total_frames_with_annotations}")
+                        for frame, count in sorted(frame_counts.items()):
+                            if frame < len(self.mrc_files):
+                                print(f"    Frame {frame} ({Path(self.mrc_files[frame]).name}): {count} annotations")
+                    
+                    self.viewer.status = f'Loaded {len(shapes_data)} annotations from {filename}'
+                    print(f"Successfully loaded {len(shapes_data)} annotations from {filename}")
+                else:
+                    self.viewer.status = f'No annotations found in {filename}'
+                    
+            except Exception as e:
+                error_msg = f'Error loading annotations: {str(e)}'
+                self.viewer.status = error_msg
+                print(error_msg)
+        
         # Create annotation controls widget
         @magicgui(
             call_button='Save Annotations',
@@ -692,8 +772,8 @@ class CryoEMFibrilAnnotator:
         if self.ps_stack is not None:
             self.viewer.window.add_dock_widget(display_controls, area='right', name='Display Controls')
         self.viewer.window.add_dock_widget(filter_controls, area='right', name='Filter Controls')
+        self.viewer.window.add_dock_widget(load_annotations, area='right', name='Load Annotations')
         self.viewer.window.add_dock_widget(annotation_controls, area='right', name='Save Annotations')
-        # self.viewer.window.add_dock_widget(load_annotations, area='right', name='Load Annotations') # Claude forgot to define this function
         
         # Add usage instructions
         instructions = """
@@ -723,7 +803,7 @@ class CryoEMFibrilAnnotator:
         
         6. Save/Load:
            - Use 'Save Annotations' to export your work
-           - Use 'Load Annotations' to restore previous work -> NOT YET IMPLEMENTED! #TODO
+           - Use 'Load Annotations' to restore previous work
         
         Navigation:
         - Scroll: zoom in/out

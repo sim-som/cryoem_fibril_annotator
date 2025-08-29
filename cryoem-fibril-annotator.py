@@ -586,14 +586,21 @@ class CryoEMFibrilAnnotator:
             show_power_spectra={'widget_type': 'CheckBox',
                                'value': False,
                                'label': 'Show Power Spectra',
-                               'tooltip': 'Toggle power spectrum display'}
+                               'tooltip': 'Toggle power spectrum display'},
+            ps_scale={'widget_type': 'FloatSlider',
+                     'min': 0.1,
+                     'max': 5.0,
+                     'value': 1.0,
+                     'label': 'PS Scale',
+                     'tooltip': 'Scale factor for power spectrum display (larger = bigger)'}
         )
-        def display_controls(show_power_spectra: bool = False):
+        def display_controls(show_power_spectra: bool = False, ps_scale: float = 1.0):
             """Control panel for display options."""
             if self.ps_layer is not None:
                 self.ps_layer.visible = show_power_spectra
+                self.ps_layer.scale = [1.0, ps_scale, ps_scale]  # Scale only in Y,X dimensions
                 if show_power_spectra:
-                    self.viewer.status = 'Power spectra visible'
+                    self.viewer.status = f'Power spectra visible (scale: {ps_scale:.1f}x)'
                 else:
                     self.viewer.status = 'Power spectra hidden'
         
@@ -857,6 +864,7 @@ class CryoEMFibrilAnnotator:
         
         1. Display Controls:
            - Toggle 'Show Power Spectra' to view corresponding 2D power spectra
+           - Use 'PS Scale' slider to make power spectra larger/smaller (1.0x = original size)
            - Power spectra are automatically synchronized with micrograph navigation
         
         2. Use slider to adjust Butterworth lowpass filter (0 = no filter)

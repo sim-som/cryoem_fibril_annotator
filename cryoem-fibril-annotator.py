@@ -964,7 +964,7 @@ def main():
             ps_files = []
             missing_ps = []
             
-            for mic_file in mic_files:
+            for mic_file in tqdm(mic_files, desc="Looking for corresponding power spectra files"):
                 corresponding_ps = find_corresponding_file(str(mic_file), str(ps_dir))
                 if corresponding_ps and Path(corresponding_ps).exists():
                     ps_files.append(corresponding_ps)

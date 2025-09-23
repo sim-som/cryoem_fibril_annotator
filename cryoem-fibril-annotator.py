@@ -674,6 +674,49 @@ class CryoEMFibrilAnnotator:
                 # Load the shapes data
                 shapes_data = annotations['shapes']
                 
+                # Reorder annotations to match current file order (for 3D annotations)
+                if loaded_ndim == 3 and len(shapes_data) > 0 and 'mrc_files' in annotations:
+                    loaded_mrc_files = annotations['mrc_files']  # Filenames from when annotations were saved
+                    current_filenames = [Path(f).name for f in self.mrc_files]  # Current session filenames
+
+                    print(f"loaded_mrc_files: {loaded_mrc_files[:10]}")
+                    print(f"current_filenames: {current_filenames[:10]}")
+                    
+                    # Create mapping from loaded file order to current file order (, if there is a different order in mrc file names) 
+                    frame_remapping = {}
+                    different_mic_order = False
+                    for loaded_idx, loaded_filename in enumerate(loaded_mrc_files):
+                        if loaded_filename in current_filenames:
+                            current_idx = current_filenames.index(loaded_filename)
+
+                            if loaded_idx != current_idx:
+                                print("Hello!: Different order of loaded and current micrographs!:")
+                                print(f"loaded_idx: {loaded_idx}")
+                                print(f"current_idx: {current_idx}")
+
+                                different_mic_order = True
+                            
+                                frame_remapping[loaded_idx] = current_idx
+                    if not different_mic_order:
+                        print(f"No different micrograph file order in annotations")
+                    
+                    # Reorder shape coordinates to match current file order
+                    corrected_shapes = []
+                    for shape in shapes_data:
+                        if len(shape) > 0:
+                            old_frame_idx = int(shape[0, 0])
+                            if old_frame_idx in frame_remapping:
+                                new_frame_idx = frame_remapping[old_frame_idx]
+                                corrected_shape = shape.copy()
+                                corrected_shape[:, 0] = new_frame_idx
+                                corrected_shapes.append(corrected_shape)
+                            else:
+                                corrected_shapes.append(shape)
+                        else:
+                            corrected_shapes.append(shape)
+                    
+                    shapes_data = corrected_shapes
+                
                 if len(shapes_data) > 0:
                     # Determine layer name and color
                     layer_name = annotations.get('layer_name', f'Loaded_{filename.stem}')
@@ -695,7 +738,7 @@ class CryoEMFibrilAnnotator:
                     new_layer = self.shapes_layers[layer_name]
                     
                     # Set the annotation data
-                    new_layer.data = shapes_data
+                    new_layer.data = np.array(shapes_data)
                     
                     # Load properties if available
                     if 'properties' in annotations and annotations['properties']:
@@ -809,7 +852,7 @@ class CryoEMFibrilAnnotator:
                     'shape_types': selected_layer.shape_type,
                     'properties': selected_layer.properties,  # Any additional properties
                     'pixel_size': self.pixel_size,
-                    'mrc_files': self.mrc_files,
+                    'mrc_files': [Path(f).name for f in self.mrc_files],
                     'ndim': selected_layer.ndim,  # Important for reloading
                     'layer_name': layer_name,  # Store the layer name
                     'edge_color': selected_layer.edge_color,  # Store the color
@@ -943,7 +986,7 @@ def main():
     
     # Get list of micrograph mrc files:
     print(f"Searching vor mics in {mic_dir}/{args.glob_pattern} ...")
-    mic_files = [f for f in mic_dir.glob(args.glob_pattern)]
+    mic_files = sorted([f for f in mic_dir.glob(args.glob_pattern)])
     
     if not mic_files:
         print("Error: No MRC files found!")

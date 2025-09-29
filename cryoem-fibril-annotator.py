@@ -364,7 +364,7 @@ class CryoEMFibrilAnnotator:
             shapes_layer = self.viewer.add_shapes(
                 name=f'{name} Annotations',
                 ndim=3,  # This ensures annotations are per-frame
-                shape_type='line',  # Lines for fibril annotation
+                #shape_type='line',  # Lines for fibril annotation
                 edge_color=color,
                 edge_width=fibril_width,
                 face_color='transparent',
@@ -375,7 +375,7 @@ class CryoEMFibrilAnnotator:
             shapes_layer = self.viewer.add_shapes(
                 name=f'{name} Annotations',
                 ndim=2,
-                shape_type='line',
+                #shape_type='line',
                 edge_color=color,
                 edge_width=fibril_width,
                 face_color='transparent',

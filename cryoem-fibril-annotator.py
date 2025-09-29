@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 """
 Napari-based tool for annotating fibrils in cryo-EM micrographs.
 Features:

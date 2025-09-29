@@ -367,7 +367,8 @@ class CryoEMFibrilAnnotator:
                 shape_type='line',  # Lines for fibril annotation
                 edge_color=color,
                 edge_width=fibril_width,
-                face_color='transparent'
+                face_color='transparent',
+                opacity=0.1,
             )
         else:
             # Single 2D image
@@ -377,7 +378,8 @@ class CryoEMFibrilAnnotator:
                 shape_type='line',
                 edge_color=color,
                 edge_width=fibril_width,
-                face_color='transparent'
+                face_color='transparent',
+                opacity=0.1
             )
         
         self.shapes_layers[name] = shapes_layer
@@ -721,6 +723,8 @@ class CryoEMFibrilAnnotator:
                     # Determine layer name and color
                     layer_name = annotations.get('layer_name', f'Loaded_{filename.stem}')
                     edge_color = annotations.get('edge_color', 'blue')  # Default to blue for loaded layers
+                    if len(edge_color) > 1:
+                        edge_color = edge_color[0]
                     
                     # Remove ' Annotations' suffix if present to avoid duplication
                     if layer_name.endswith(' Annotations'):

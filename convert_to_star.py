@@ -7,9 +7,8 @@ Set inter-box distance either absolute in Angstrom or relative by also providing
 
 import argparse
 import numpy as np
-import pandas as pd
 from pathlib import Path
-from typing import Dict, List, Tuple, Any
+from typing import Dict, List, Any
 
 
 def load_annotation_file(npy_path: Path) -> Dict[str, Any]:
@@ -106,8 +105,7 @@ def extract_filament_coordinates(shapes: List[np.ndarray],
 
 def generate_particle_coordinates(filaments: List[Dict[str, Any]],
                                  inter_box_distance: float,
-                                 pixel_size: float,
-                                 box_size: int = 256) -> List[Dict[str, Any]]:
+                                 pixel_size: float) -> List[Dict[str, Any]]:
     """
     Generate particle coordinates along filaments at specified intervals.
 
@@ -115,7 +113,6 @@ def generate_particle_coordinates(filaments: List[Dict[str, Any]],
         filaments: List of filament coordinate dictionaries
         inter_box_distance: Distance between particle boxes in Angstroms
         pixel_size: Pixel size in Angstroms per pixel
-        box_size: Box size for particle extraction in pixels
 
     Returns:
         List of particle coordinate dictionaries
@@ -177,7 +174,7 @@ def create_star_file(particles: List[Dict[str, Any]],
                     pixel_size: float,
                     output_path: Path) -> None:
     """
-    Create RELION .star file from particle coordinates.
+    Create RELION autopick-compatible .star file from particle coordinates.
 
     Args:
         particles: List of particle coordinate dictionaries
@@ -196,20 +193,18 @@ def create_star_file(particles: List[Dict[str, Any]],
             particles_by_frame[frame_idx] = []
         particles_by_frame[frame_idx].append(particle)
 
-    # Create STAR file content
+    # Create STAR file content in autopick format
     star_lines = []
-    star_lines.append("# RELION format star file")
+    star_lines.append("# RELION autopick format star file")
     star_lines.append("# Created by convert_to_star.py")
     star_lines.append("")
-    star_lines.append("data_")
+    star_lines.append("data_autopick")
     star_lines.append("")
     star_lines.append("loop_")
     star_lines.append("_rlnCoordinateX #1")
     star_lines.append("_rlnCoordinateY #2")
     star_lines.append("_rlnMicrographName #3")
-    star_lines.append("_rlnAnglePsi #4")
-    star_lines.append("_rlnHelicalTrackLength #5")
-    star_lines.append("_rlnHelicalTubeID #6")
+    star_lines.append("_rlnAutopickFigureOfMerit #4")
 
     # Write particle data
     for frame_idx in sorted(particles_by_frame.keys()):
@@ -224,20 +219,22 @@ def create_star_file(particles: List[Dict[str, Any]],
             # Convert coordinates to RELION format (x, y in pixels)
             coord_x = particle['coordinate_x']
             coord_y = particle['coordinate_y']
-            psi_angle = particle['psi_angle']
-            tube_id = particle['filament_id']
-            track_length = particle['distance_along_filament']
 
-            star_lines.append(f"{coord_x:8.2f} {coord_y:8.2f} {micrograph_name} {psi_angle:8.2f} {track_length:8.2f} {tube_id}")
+            # Set default figure of merit (FOM) value for autopick compatibility
+            # Higher values indicate better picks (0.0 to 1.0 range typical)
+            figure_of_merit = 0.9
+
+            star_lines.append(f"{coord_x:8.2f} {coord_y:8.2f} {micrograph_name} {figure_of_merit:6.3f}")
 
     # Write to file
     with open(output_path, 'w') as f:
         f.write('\n'.join(star_lines))
 
-    print(f"Created .star file: {output_path}")
+    print(f"Created autopick-compatible .star file: {output_path}")
     print(f"  - Total particles: {len(particles)}")
     print(f"  - Micrographs: {len(particles_by_frame)}")
     print(f"  - Pixel size: {pixel_size} Å/px")
+    print(f"  - Format: RELION autopick (compatible for import)")
 
 
 def main():
@@ -255,9 +252,6 @@ Examples:
 
   # Specify output file
   python convert_to_star.py annotations.npy -o fibrils.star
-
-  # Custom box size for extraction
-  python convert_to_star.py annotations.npy --box_size 512
         """
     )
 
@@ -267,8 +261,6 @@ Examples:
                        help='Output .star file (default: based on input filename)')
     parser.add_argument('--inter_box_distance', type=float, default=100.0,
                        help='Inter-box distance in Angstroms (default: 100)')
-    parser.add_argument('--box_size', type=int, default=256,
-                       help='Box size for particle extraction in pixels (default: 256)')
 
     args = parser.parse_args()
 
@@ -312,8 +304,7 @@ Examples:
         particles = generate_particle_coordinates(
             filaments,
             args.inter_box_distance,
-            annotations['pixel_size'],
-            args.box_size
+            annotations['pixel_size']
         )
 
         if not particles:

@@ -10,6 +10,33 @@ import numpy as np
 import pandas as pd
 from pathlib import Path
 from typing import Dict, List, Tuple, Any
+import mrcfile
+
+
+def get_micrograph_dimensions(mrc_path: Path) -> Tuple[int, int]:
+    """
+    Get dimensions (height, width) of an MRC file.
+
+    Args:
+        mrc_path: Path to the MRC file
+
+    Returns:
+        Tuple of (height, width) in pixels
+    """
+    try:
+        with mrcfile.open(mrc_path, permissive=True) as mrc:
+            # MRC data shape is typically (height, width) for 2D or (nz, ny, nx) for 3D
+            shape = mrc.data.shape
+            if len(shape) == 2:
+                height, width = shape
+            elif len(shape) == 3:
+                # For stacks, use the first frame dimensions
+                _, height, width = shape
+            else:
+                raise ValueError(f"Unexpected MRC dimensions: {shape}")
+            return height, width
+    except Exception as e:
+        raise ValueError(f"Failed to read MRC file {mrc_path}: {e}")
 
 
 def load_annotation_file(npy_path: Path) -> Dict[str, Any]:
@@ -72,7 +99,8 @@ def extract_filament_coordinates(shapes: List[np.ndarray],
                                 shape_types: Any,
                                 frame_indices: List[int] = None,
                                 ndim: int = 2,
-                                split_paths: bool = False) -> List[Dict[str, Any]]:
+                                split_paths: bool = False,
+                                micrograph_heights: List[int] = None) -> List[Dict[str, Any]]:
     """
     Extract start-end coordinates from line/path annotations.
 
@@ -82,6 +110,7 @@ def extract_filament_coordinates(shapes: List[np.ndarray],
         frame_indices: Frame indices for 3D annotations
         ndim: Number of dimensions (2 or 3)
         split_paths: If True, split multi-point paths into individual segments
+        micrograph_heights: List of micrograph heights for coordinate conversion (napari to RELION)
 
     Returns:
         List of dictionaries with filament coordinate data
@@ -114,17 +143,34 @@ def extract_filament_coordinates(shapes: List[np.ndarray],
                 continue
             frame_idx = 0  # Single frame
 
+        # Get micrograph height for coordinate conversion
+        if micrograph_heights and frame_idx < len(micrograph_heights):
+            micrograph_height = micrograph_heights[frame_idx]
+        else:
+            micrograph_height = None
+
         # Split multi-point paths into segments if requested
         if split_paths and len(shape) > 2:
             segments = split_path_into_segments(shape, ndim)
             for start_coords, end_coords in segments:
+                # Convert napari coordinates (top-left origin) to RELION (bottom-left origin)
+                start_y_napari = float(start_coords[0])
+                end_y_napari = float(end_coords[0])
+
+                if micrograph_height is not None:
+                    start_y = micrograph_height - start_y_napari
+                    end_y = micrograph_height - end_y_napari
+                else:
+                    start_y = start_y_napari
+                    end_y = end_y_napari
+
                 filaments.append({
                     'filament_id': filament_id,
                     'frame_index': frame_idx,
                     'start_x': float(start_coords[1]),  # x coordinate
-                    'start_y': float(start_coords[0]),  # y coordinate
+                    'start_y': start_y,  # y coordinate (converted)
                     'end_x': float(end_coords[1]),      # x coordinate
-                    'end_y': float(end_coords[0]),      # y coordinate
+                    'end_y': end_y,      # y coordinate (converted)
                     'shape_type': shape_type,
                     'length_pixels': float(np.linalg.norm(end_coords - start_coords))
                 })
@@ -138,13 +184,24 @@ def extract_filament_coordinates(shapes: List[np.ndarray],
                 start_coords = shape[0]   # [y, x]
                 end_coords = shape[-1]    # [y, x]
 
+            # Convert napari coordinates (top-left origin) to RELION (bottom-left origin)
+            start_y_napari = float(start_coords[0])
+            end_y_napari = float(end_coords[0])
+
+            if micrograph_height is not None:
+                start_y = micrograph_height - start_y_napari
+                end_y = micrograph_height - end_y_napari
+            else:
+                start_y = start_y_napari
+                end_y = end_y_napari
+
             filaments.append({
                 'filament_id': filament_id,
                 'frame_index': frame_idx,
                 'start_x': float(start_coords[1]),  # x coordinate
-                'start_y': float(start_coords[0]),  # y coordinate
+                'start_y': start_y,  # y coordinate (converted)
                 'end_x': float(end_coords[1]),      # x coordinate
-                'end_y': float(end_coords[0]),      # y coordinate
+                'end_y': end_y,      # y coordinate (converted)
                 'shape_type': shape_type,
                 'length_pixels': float(np.linalg.norm(end_coords - start_coords))
             })
@@ -367,26 +424,29 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Basic conversion with default 100 Å spacing
-  python convert_to_star.py annotations.npy
+  # Basic conversion with micrograph shape (RECOMMENDED - fast)
+  python convert_to_star.py annotations.npy --mic_shape 4096 4096   # For Falcon 4 camera
+  python convert_to_star.py annotations.npy --mic_shape 4092 5760   # For Gatan K3 (non-superresolution)
 
-  # Custom inter-box distance
-  python convert_to_star.py annotations.npy --inter_box_distance 150
+  # Export manual pick files with micrograph shape
+  python convert_to_star.py annotations.npy --manualpick --mic_shape 4096 4096
 
-  # Specify output file
-  python convert_to_star.py annotations.npy -o fibrils.star
-
-  # Custom box size for extraction
-  python convert_to_star.py annotations.npy --box_size 512
-
-  # Export per-micrograph manual pick files (for helical coordinates)
-  python convert_to_star.py annotations.npy --manualpick
+  # Custom inter-box distance with coordinate conversion
+  python convert_to_star.py annotations.npy --inter_box_distance 150 --mic_shape 4096 4096
 
   # Export manual pick files and split multi-point paths into segments
-  python convert_to_star.py annotations.npy --manualpick --split_paths
+  python convert_to_star.py annotations.npy --manualpick --split_paths --mic_shape 4096 4096
 
-  # Export manual pick files to custom directory
-  python convert_to_star.py annotations.npy --manualpick --manualpick_dir /path/to/output/
+  # Alternative: Load MRC files to determine shape automatically (slower)
+  python convert_to_star.py annotations.npy --manualpick --mrc_dir /path/to/micrographs/
+
+  # Specify output file
+  python convert_to_star.py annotations.npy -o fibrils.star --mic_shape 4096 4096
+
+Note: Either --mic_shape or --mrc_dir is required to correctly convert y-coordinates from
+napari (top-left origin) to RELION (bottom-left origin) convention. Without either option,
+coordinates will appear vertically mirrored in RELION. Use --mic_shape for speed when all
+micrographs have the same dimensions.
         """
     )
 
@@ -404,6 +464,10 @@ Examples:
                        help='Output directory for manual pick star files (default: {input}_manualpick/)')
     parser.add_argument('--split_paths', action='store_true',
                        help='Split multi-point paths into individual start-end segments')
+    parser.add_argument('--mrc_dir', type=Path,
+                       help='Directory containing MRC files for coordinate conversion (required for correct y-axis)')
+    parser.add_argument('--mic_shape', type=int, nargs=2, metavar=('HEIGHT', 'WIDTH'),
+                       help='Micrograph shape as HEIGHT WIDTH (alternative to --mrc_dir, faster)')
 
     args = parser.parse_args()
 
@@ -427,6 +491,46 @@ Examples:
         print(f"Loading annotations from {args.npy_file}")
         annotations = load_annotation_file(args.npy_file)
 
+        # Get micrograph dimensions for coordinate conversion
+        micrograph_heights = None
+
+        if args.mic_shape:
+            # Use provided micrograph shape (fast method)
+            height, width = args.mic_shape
+            num_micrographs = len(annotations.get('mrc_files', []))
+            micrograph_heights = [height] * num_micrographs
+            print(f"Using provided micrograph shape: {width}x{height} pixels")
+            print(f"Applying to {num_micrographs} micrographs")
+
+        elif args.mrc_dir:
+            # Load MRC files to get micrograph dimensions (slow but accurate)
+            print(f"Loading MRC files from {args.mrc_dir} for coordinate conversion...")
+            mrc_files = annotations.get('mrc_files', [])
+            micrograph_heights = []
+
+            for mrc_filename in mrc_files:
+                mrc_path = args.mrc_dir / mrc_filename
+                if mrc_path.exists():
+                    try:
+                        height, width = get_micrograph_dimensions(mrc_path)
+                        micrograph_heights.append(height)
+                        print(f"  {mrc_filename}: {width}x{height} pixels")
+                    except Exception as e:
+                        print(f"  Warning: Failed to read {mrc_filename}: {e}")
+                        micrograph_heights.append(None)
+                else:
+                    print(f"  Warning: MRC file not found: {mrc_path}")
+                    micrograph_heights.append(None)
+
+            if not micrograph_heights:
+                print("Warning: No MRC files found. Coordinates will not be converted.")
+                micrograph_heights = None
+        else:
+            print("Warning: Neither --mic_shape nor --mrc_dir specified.")
+            print("         Y-coordinates will NOT be converted to RELION convention.")
+            print("         This may cause coordinates to appear mirrored in RELION.")
+            micrograph_heights = None
+
         # Extract filament coordinates
         print("Extracting filament coordinates...")
         filaments = extract_filament_coordinates(
@@ -434,7 +538,8 @@ Examples:
             annotations.get('shape_types', 'line'),
             annotations.get('frame_indices'),
             annotations.get('ndim', 2),
-            split_paths=args.split_paths
+            split_paths=args.split_paths,
+            micrograph_heights=micrograph_heights
         )
 
         if not filaments:

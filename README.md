@@ -222,24 +222,27 @@ _rlnAutopickFigureOfMerit #5
 
 ✅ **Recommendation**: Use `--mic_shape` when all micrographs have the same dimensions (much faster than loading MRC files).
 
-#### Example Workflow
+#### Example Workflow RELION:
 
+1. Annotate fibrils in napari
 ```bash
-# 1. Annotate fibrils in napari
 python cryoem-fibril-annotator.py /path/to/micrographs/
-
-# 2. Save annotations as Ab42_annotations.npy
-
-# 3. Convert to RELION manual pick files
-python convert_to_star.py Ab42_annotations.npy --manualpick --mic_shape 4096 4096
-
-# 4. Output: Ab42_annotations_manualpick/ directory with per-micrograph .star files
-#    - micrograph_001_manualpick.star
-#    - micrograph_002_manualpick.star
-#    - ...
-
-# 5. Import to RELION for helical processing
 ```
+
+2. Save annotations as Ab42_annotations.npy
+
+3. Convert to RELION manual pick files
+```bash
+python convert_to_star.py Ab42_annotations.npy --manualpick --mic_shape 4096 4096
+```
+
+4. Output: Ab42_annotations_manualpick/ directory with per-micrograph .star files
+- micrograph_001_manualpick.star
+- micrograph_002_manualpick.star
+- ...
+
+5. Import to RELION for helical processing
+
 
 ## Interactive Controls
 

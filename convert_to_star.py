@@ -428,6 +428,9 @@ Examples:
   python convert_to_star.py annotations.npy --mic_shape 4096 4096   # For Falcon 4 camera
   python convert_to_star.py annotations.npy --mic_shape 4092 5760   # For Gatan K3 (non-superresolution)
 
+  # Override pixel size if MRC header has incorrect value
+  python convert_to_star.py annotations.npy --mic_shape 4096 4096 --pixel_size 1.05
+
   # Export manual pick files with micrograph shape
   python convert_to_star.py annotations.npy --manualpick --mic_shape 4096 4096
 
@@ -468,6 +471,8 @@ micrographs have the same dimensions.
                        help='Directory containing MRC files for coordinate conversion (required for correct y-axis)')
     parser.add_argument('--mic_shape', type=int, nargs=2, metavar=('HEIGHT', 'WIDTH'),
                        help='Micrograph shape as HEIGHT WIDTH (alternative to --mrc_dir, faster)')
+    parser.add_argument('--pixel_size', type=float,
+                       help='Override pixel size in Angstroms (use if MRC header pixel size is incorrect)')
 
     args = parser.parse_args()
 
@@ -490,6 +495,25 @@ micrographs have the same dimensions.
         # Load annotation file
         print(f"Loading annotations from {args.npy_file}")
         annotations = load_annotation_file(args.npy_file)
+
+        # Handle pixel size override
+        annotation_pixel_size = annotations.get('pixel_size', 1.0)
+
+        if args.pixel_size:
+            # User specified pixel size - use it
+            pixel_size = args.pixel_size
+            print(f"Using user-specified pixel size: {pixel_size} Å/px (annotation file has {annotation_pixel_size} Å/px)")
+        else:
+            # Use pixel size from annotation file
+            pixel_size = annotation_pixel_size
+
+            # Warn if pixel size looks suspicious (exactly 1.0 Å is often incorrect)
+            if abs(pixel_size - 1.0) < 0.001:
+                print("=" * 70)
+                print("WARNING: Pixel size is 1.0 Å/px, which is likely incorrect!")
+                print("This may indicate missing or wrong pixel size in the MRC header.")
+                print("Consider using --pixel_size to specify the correct value.")
+                print("=" * 70)
 
         # Get micrograph dimensions for coordinate conversion
         micrograph_heights = None
@@ -576,7 +600,7 @@ micrographs have the same dimensions.
             particles = generate_particle_coordinates(
                 filaments,
                 args.inter_box_distance,
-                annotations['pixel_size'],
+                pixel_size,
                 args.box_size
             )
 
@@ -589,7 +613,7 @@ micrographs have the same dimensions.
             create_star_file(
                 particles,
                 annotations.get('mrc_files', []),
-                annotations['pixel_size'],
+                pixel_size,
                 output_file
             )
 

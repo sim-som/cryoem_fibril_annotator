@@ -10,7 +10,6 @@ A napari-based tool for annotating fibrils in cryo-EM (cryo-electron microscopy)
 - **Fibril Annotation**: Line and polyline tracing tools for manual fibril annotation
 - **Multi-layer Support**: Create separate annotation layers for different fibril types (Aβ42, Tau, α-synuclein, etc.)
 - **Memory Efficient**: Handles large datasets (>GB) using Dask arrays and lazy loading
-- **Robust File Handling**: Supports MRC files with corruption handling via permissive mode
 - **Annotation Persistence**: Save and load annotations with full metadata preservation
 
 ## Installation
@@ -129,7 +128,6 @@ project_directory/
 
 **Compatibility checks:**
 - **Pixel size matching**: Warns if pixel sizes differ between sessions
-- **Dimension compatibility**: Ensures 2D/3D consistency
 - **File correspondence**: Maps annotations to correct micrographs even if file order changed
 
 ## Interactive Controls
@@ -172,7 +170,6 @@ project_directory/
 ### File Format Support
 - **MRC Files**: Primary format with robust error handling
 - **Stack Support**: Both individual files and stacks supported
-- **Corruption Handling**: Permissive mode fallbacks for non-standard files
 - **Annotation Files**: NumPy format (.npy) with pickle support for complex metadata
 
 ### Annotation Data Format
@@ -198,8 +195,6 @@ annotations = {
 This tool is designed for cryo-EM structural biology workflows, specifically:
 - Manual annotation of amyloid fibril structures in micrographs
 - Ground truth generation for machine learning training datasets
-- Interactive quality control of cryo-EM data
-- Resolution-based filtering using scientific units (Angstroms)
 - Multi-class fibril annotation for comparative studies
 
 ## Keyboard Shortcuts
@@ -220,14 +215,9 @@ This tool is designed for cryo-EM structural biology workflows, specifically:
 1. **Layer Organization**: Create separate layers for each fibril type
 2. **Consistent Naming**: Use descriptive layer names (e.g., "Aβ42_fibrils", "Tau_tangles")
 3. **Regular Saving**: Save annotations frequently to prevent data loss
-4. **Quality Control**: Use power spectra to verify fibril presence and orientation
+4. **Cross beta signal**: Use power spectra to verify fibril presence and orientation
 5. **Resolution Filtering**: Apply appropriate lowpass filtering to reduce noise
 
-### File Management
-- Save each fibril type to a separate .npy file
-- Use consistent naming conventions across projects
-- Keep annotation files in a dedicated directory
-- Document pixel sizes and experimental conditions
 
 ## Development Notes
 
@@ -237,21 +227,6 @@ This tool is designed for cryo-EM structural biology workflows, specifically:
 - Handles float16/float32 conversions automatically
 - GUI requires display environment (not suitable for headless servers)
 
-## Common Issues
-
-- **MRC File Corruption**: Application handles this automatically with permissive mode
-- **Memory Usage**: Large datasets require proper Dask chunking (handled automatically)
-- **Display Issues**: Requires GUI environment (not suitable for headless servers)
-- **Annotation Loading**: File order differences are automatically resolved during loading
-
-## Support
-
-For issues and feature requests, please refer to the project documentation or contact the development team.
-
 ## License
 
 [Add license information if applicable]
-
-## Contributing
-
-[Add contribution guidelines if applicable]

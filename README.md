@@ -130,6 +130,117 @@ project_directory/
 - **Pixel size matching**: Warns if pixel sizes differ between sessions
 - **File correspondence**: Maps annotations to correct micrographs even if file order changed
 
+### Converting Annotations to RELION Format
+
+The `convert_to_star.py` script converts saved annotations (.npy files) to RELION-compatible .star files for downstream cryo-EM processing. The script handles coordinate system conversion between napari (top-left origin) and RELION (bottom-left origin).
+
+#### Basic Conversion
+
+**Generate particle coordinates along fibrils:**
+```bash
+# Recommended: Provide micrograph dimensions for fast coordinate conversion
+python convert_to_star.py annotations.npy --mic_shape 4096 4096
+
+# Common camera formats:
+python convert_to_star.py annotations.npy --mic_shape 4096 4096   # Falcon 4
+python convert_to_star.py annotations.npy --mic_shape 4092 5760   # Gatan K3 (non-superresolution)
+
+# Custom inter-box spacing (default: 100 Å)
+python convert_to_star.py annotations.npy --inter_box_distance 150 --mic_shape 4096 4096
+
+# Custom output filename
+python convert_to_star.py annotations.npy -o fibrils.star --mic_shape 4096 4096
+```
+
+#### Manual Pick Files (Start-End Coordinates)
+
+**Export filament endpoints for RELION helical processing:**
+```bash
+# Export per-micrograph manual pick files
+python convert_to_star.py annotations.npy --manualpick --mic_shape 4096 4096
+
+# Split multi-point paths into individual segments
+python convert_to_star.py annotations.npy --manualpick --split_paths --mic_shape 4096 4096
+
+# Custom output directory
+python convert_to_star.py annotations.npy --manualpick --manualpick_dir my_picks/ --mic_shape 4096 4096
+```
+
+#### Alternative: Auto-detect Micrograph Dimensions
+
+**Load MRC files to determine dimensions (slower but accurate for mixed sizes):**
+```bash
+python convert_to_star.py annotations.npy --manualpick --mrc_dir /path/to/micrographs/
+```
+
+#### Conversion Modes
+
+**1. Particle Coordinates Mode (default)**
+- Generates evenly-spaced particle coordinates along each fibril
+- Includes helical tube ID and track length for RELION
+- Calculates psi angle (filament orientation)
+- Suitable for helical reconstruction workflows
+
+**Output format:**
+```
+_rlnCoordinateX #1
+_rlnCoordinateY #2
+_rlnMicrographName #3
+_rlnAnglePsi #4
+_rlnHelicalTrackLength #5
+_rlnHelicalTubeID #6
+```
+
+**2. Manual Pick Mode (`--manualpick`)**
+- Exports start-end coordinates for each fibril
+- Creates one .star file per micrograph
+- Compatible with RELION manual picking format
+- Suitable for helical picking workflows
+
+**Output format:**
+```
+_rlnCoordinateX #1
+_rlnCoordinateY #2
+_rlnParticleSelectionType #3
+_rlnAnglePsi #4
+_rlnAutopickFigureOfMerit #5
+```
+
+#### Key Options
+
+- `--mic_shape HEIGHT WIDTH`: Micrograph dimensions (recommended for speed)
+- `--mrc_dir PATH`: Load MRC files to auto-detect dimensions (slower)
+- `--manualpick`: Export start-end coordinates instead of particle positions
+- `--split_paths`: Split polylines into individual segments
+- `--inter_box_distance`: Spacing between particles in Angstroms (default: 100)
+- `--box_size`: Box size for particle extraction in pixels (default: 256)
+- `-o, --output`: Custom output filename
+
+#### Important Notes
+
+⚠️ **Coordinate System Conversion**: Either `--mic_shape` or `--mrc_dir` is **required** to correctly convert y-coordinates from napari's top-left origin to RELION's bottom-left origin. Without this, coordinates will appear vertically mirrored in RELION.
+
+✅ **Recommendation**: Use `--mic_shape` when all micrographs have the same dimensions (much faster than loading MRC files).
+
+#### Example Workflow
+
+```bash
+# 1. Annotate fibrils in napari
+python cryoem-fibril-annotator.py /path/to/micrographs/
+
+# 2. Save annotations as Ab42_annotations.npy
+
+# 3. Convert to RELION manual pick files
+python convert_to_star.py Ab42_annotations.npy --manualpick --mic_shape 4096 4096
+
+# 4. Output: Ab42_annotations_manualpick/ directory with per-micrograph .star files
+#    - micrograph_001_manualpick.star
+#    - micrograph_002_manualpick.star
+#    - ...
+
+# 5. Import to RELION for helical processing
+```
+
 ## Interactive Controls
 
 ### Display Controls
@@ -229,4 +340,4 @@ This tool is designed for cryo-EM structural biology workflows, specifically:
 
 ## License
 
-[Add license information if applicable]
+[Add license information]

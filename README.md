@@ -4,10 +4,10 @@ A napari-based tool for annotating fibrils in cryo-EM (cryo-electron microscopy)
 
 ## Features
 
-- **Interactive Visualization**: Real-time visualization of cryo-EM micrographs with napari
+- **Interactive Display**: Real-time visualization of cryo-EM micrographs with napari
 - **Power Spectrum Support**: Synchronized display of micrographs and their corresponding power spectra
 - **Real-time Filtering**: Butterworth lowpass filtering with Angstrom-based resolution control
-- **Fibril Annotation**: Line and polyline tracing tools for manual fibril annotation
+- **Flexible Fibril Annotation**: Line and polyline tracing tools for straight **and** curved fibrils
 - **Multi-layer Support**: Create separate annotation layers for different fibril types (Aβ42, Tau, α-synuclein, etc.)
 - **Memory Efficient**: Handles large datasets (>GB) using Dask arrays and lazy loading
 - **Annotation Persistence**: Save and load annotations with full metadata preservation

@@ -59,6 +59,30 @@ python cryoem-fibril-annotator.py /path/to/micrographs/ --ps_dir /path/to/power_
 python cryoem-fibril-annotator.py /path/to/micrographs/ --glob_pattern "*.mrc" --ps_dir /path/to/ps/ --ps_glob "*_ctf_2D.mrc"
 ```
 
+### Ordered Micrograph List
+
+Instead of using glob patterns, you can specify a text file containing an ordered list of micrograph filenames. This is useful when you want to display micrographs in a specific order (e.g., sorted by a quality metric like CTF cross-beta signal).
+
+```bash
+# Use ordered micrograph list
+python cryoem-fibril-annotator.py /path/to/micrographs/ --mic_list sorted_micrographs.txt
+
+# With power spectra
+python cryoem-fibril-annotator.py /path/to/micrographs/ --mic_list sorted_micrographs.txt --ps_dir /path/to/ps/
+```
+
+**File format:** One micrograph filename per line (filenames only, not full paths):
+```
+FoilHole_19716441_Data_19662880_19_20251220_192958_fractions.mrc
+FoilHole_19716447_Data_19662880_6_20251220_191627_fractions.mrc
+FoilHole_19697520_Data_19662886_34_20251220_162636_fractions.mrc
+```
+
+**Notes:**
+- `--mic_list` and `--glob_pattern` are mutually exclusive
+- Files not found in the micrograph directory are reported as warnings
+- Power spectra are automatically matched by filename pattern
+
 
 ## Annotation System
 

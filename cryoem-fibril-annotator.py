@@ -108,8 +108,8 @@ class CryoEMFibrilAnnotator:
         ps_files : List[str], optional
             List of paths to power spectrum MRC files
         """
-        self.mrc_files = sorted(mrc_files)
-        self.ps_files = sorted(ps_files) if ps_files else None
+        self.mrc_files = list(mrc_files)  # Preserve order from caller
+        self.ps_files = list(ps_files) if ps_files else None  # Preserve order from caller
         self.pixel_size = pixel_size
         self.viewer = None
         self.image_layer = None
@@ -962,17 +962,22 @@ class CryoEMFibrilAnnotator:
 
 def main():
     """Main entry point for the script.
-    
+
     Required dependencies:
         pip install napari[all] dask mrcfile scikit-image magicgui
     """
     import argparse
-    
+
     parser = argparse.ArgumentParser(description='Annotate fibrils in cryo-EM micrographs')
     # micrograph mrc files:
     parser.add_argument('mic_dir', help='Location of MRC micrographs')
-    parser.add_argument('--glob_pattern', default="*_fractions_patch_aligned_doseweighted.mrc", help='Search pattern (default: "*_fractions_patch_aligned_doseweighted.mrc")')
-    # TODO add option to select commond file endings (*.mrc, *_fracitions.mrc, etc.)
+
+    # Mutually exclusive group: either glob_pattern or mic_list
+    mic_selection = parser.add_mutually_exclusive_group()
+    mic_selection.add_argument('--glob_pattern', default=None, help='Search pattern (e.g., "*_fractions_patch_aligned_doseweighted.mrc")')
+    mic_selection.add_argument('--mic_list', type=str, default=None,
+                               help='Text file containing ordered list of micrograph filenames (one per line). '
+                                    'Alternative to --glob_pattern. Micrographs will be displayed in the order specified in the file.')
 
     # Optional: Add location of 2D powerspectra, that were already calculated during CTF estimation / preproscessing:
     parser.add_argument("--ps_dir", default=None, help="Directory path with precalculated 2D powerspectra (optinal but helpful for amyloid fibril picking)")
@@ -987,24 +992,60 @@ def main():
     mic_dir = Path(args.mic_dir)
     assert mic_dir.exists()
     assert mic_dir.is_dir()
-    
-    # Get list of micrograph mrc files:
-    print(f"Searching vor mics in {mic_dir}/{args.glob_pattern} ...")
-    mic_files = sorted([f for f in mic_dir.glob(args.glob_pattern)])
-    
+
+    # Get list of micrograph mrc files (either via glob_pattern or mic_list)
+    if args.mic_list:
+        # Read ordered list of micrograph filenames from text file
+        mic_list_path = Path(args.mic_list)
+        if not mic_list_path.exists():
+            print(f"Error: Micrograph list file not found: {mic_list_path}")
+            sys.exit(1)
+
+        print(f"Reading micrograph list from {mic_list_path} ...")
+        with open(mic_list_path, 'r') as f:
+            mic_filenames = [line.strip() for line in f if line.strip()]
+
+        if not mic_filenames:
+            print("Error: Micrograph list file is empty!")
+            sys.exit(1)
+
+        print(f"Found {len(mic_filenames)} entries in micrograph list")
+
+        # Find matching files in mic_dir, preserving the order from the list
+        mic_files = []
+        missing_files = []
+        for filename in tqdm(mic_filenames, desc="Locating micrographs from list"):
+            mic_path = mic_dir / filename
+            if mic_path.exists():
+                mic_files.append(mic_path)
+            else:
+                missing_files.append(filename)
+
+        if missing_files:
+            print(f"Warning: {len(missing_files)} files from list not found in {mic_dir}:")
+            for missing in missing_files[:5]:
+                print(f"  {missing}")
+            if len(missing_files) > 5:
+                print(f"  ... and {len(missing_files) - 5} more")
+    else:
+        # Use glob pattern (default if neither option specified)
+        glob_pattern = args.glob_pattern if args.glob_pattern else "*_fractions_patch_aligned_doseweighted.mrc"
+        print(f"Searching for mics in {mic_dir}/{glob_pattern} ...")
+        mic_files = sorted([f for f in mic_dir.glob(glob_pattern)])
+
     if not mic_files:
         print("Error: No MRC files found!")
         sys.exit(1)
 
     num_mics = len(mic_files)
     print(f"Found {num_mics} micrographs")
-    
+
     # Check files exist
     mic_files = [f for f in tqdm(mic_files, desc="Checking if files exist") if Path(f).exists()]
     if not mic_files:
         print("Error: No valid MRC files found!")
         sys.exit(1)
-    
+
     print(f"Found {len(mic_files)} MRC files")
 
     # if given get list of 2D powerspectra files:

@@ -7,10 +7,9 @@ A napari-based tool for annotating fibrils in cryo-EM (cryo-electron microscopy)
 - **Interactive Display**: Real-time visualization of cryo-EM micrographs with napari
 - **Power Spectrum Support**: Synchronized display of micrographs and their corresponding power spectra
 - **Real-time Filtering**: Butterworth lowpass filtering with Angstrom-based resolution control
-- **Flexible Fibril Annotation**: Line and polyline tracing tools for straight **and** curved fibrils
 - **Multi-layer Support**: Create separate annotation layers for different fibril types (Aβ42, Tau, α-synuclein, etc.)
+- **Flexible Fibril Annotation**: Line and polyline tracing tools for straight **and** curved fibrils
 - **Memory Efficient**: Handles large datasets (>GB) using Dask arrays and lazy loading
-- **Annotation Persistence**: Save and load annotations with full metadata preservation
 
 ## Installation
 
@@ -132,7 +131,6 @@ project_directory/
 ├── annotations/
 │   ├── Ab42_annotations.npy
 │   ├── Tau_annotations.npy
-│   └── alpha_synuclein_annotations.npy
 └── cryoem-fibril-annotator.py
 ```
 
@@ -150,52 +148,9 @@ project_directory/
 - **Conflict resolution**: Handles duplicate layer names automatically
 - **Edge width preservation**: Maintains fibril width based on pixel size
 
-**Compatibility checks:**
-- **Pixel size matching**: Warns if pixel sizes differ between sessions
-- **File correspondence**: Maps annotations to correct micrographs even if file order changed
+### Converting Annotations to STAR Format
 
-### Converting Annotations to RELION Format
-
-The `convert_to_star.py` script converts saved annotations (.npy files) to RELION-compatible .star files for downstream cryo-EM processing. The script handles coordinate system conversion between napari (top-left origin) and RELION (bottom-left origin).
-
-#### Basic Conversion
-
-**Generate particle coordinates along fibrils:**
-```bash
-# Recommended: Provide micrograph dimensions for fast coordinate conversion
-python convert_to_star.py annotations.npy --mic_shape 4096 4096
-
-# Common camera formats:
-python convert_to_star.py annotations.npy --mic_shape 4096 4096   # Falcon 4
-python convert_to_star.py annotations.npy --mic_shape 4092 5760   # Gatan K3 (non-superresolution)
-
-# Custom inter-box spacing (default: 100 Å)
-python convert_to_star.py annotations.npy --inter_box_distance 150 --mic_shape 4096 4096
-
-# Custom output filename
-python convert_to_star.py annotations.npy -o fibrils.star --mic_shape 4096 4096
-```
-
-#### Manual Pick Files (Start-End Coordinates)
-
-**Export filament endpoints for RELION helical processing:**
-```bash
-# Export per-micrograph manual pick files
-python convert_to_star.py annotations.npy --manualpick --mic_shape 4096 4096
-
-# Split multi-point paths into individual segments
-python convert_to_star.py annotations.npy --manualpick --split_paths --mic_shape 4096 4096
-
-# Custom output directory
-python convert_to_star.py annotations.npy --manualpick --manualpick_dir my_picks/ --mic_shape 4096 4096
-```
-
-#### Alternative: Auto-detect Micrograph Dimensions
-
-**Load MRC files to determine dimensions (slower but accurate for mixed sizes):**
-```bash
-python convert_to_star.py annotations.npy --manualpick --mrc_dir /path/to/micrographs/
-```
+The `convert_to_star.py` script converts saved annotations (.npy files) to RELION- and CRYOSPARC-compatible .star files for downstream cryo-EM processing.
 
 #### Conversion Modes
 
@@ -203,7 +158,6 @@ python convert_to_star.py annotations.npy --manualpick --mrc_dir /path/to/microg
 - Generates evenly-spaced particle coordinates along each fibril
 - Includes helical tube ID and track length for RELION
 - Calculates psi angle (filament orientation)
-- Suitable for helical reconstruction workflows
 
 **Output format:**
 ```
@@ -219,7 +173,6 @@ _rlnHelicalTubeID #6
 - Exports start-end coordinates for each fibril
 - Creates one .star file per micrograph
 - Compatible with RELION manual picking format
-- Suitable for helical picking workflows
 
 **Output format:**
 ```
@@ -230,42 +183,53 @@ _rlnAnglePsi #4
 _rlnAutopickFigureOfMerit #5
 ```
 
+#### Basic Conversion
+
+**Generate particle coordinates along fibrils:**
+```bash
+python convert_to_star.py annotations.npy 
+
+# Custom inter-box spacing (default: 100 Å)
+python convert_to_star.py annotations.npy --inter_box_distance 150 
+
+# Custom output filename
+python convert_to_star.py annotations.npy -o fibrils.star 
+```
+
+#### Flip y-coordinates
+In order to flip the y-coordinates one also has to supply the micrograph image dimensions - either via `--mic_shape` or by specifying the micrographs directory via `--mrc_dir`:
+```bash
+python convert_to_star.py annotations.npy --flip-y --mic_shape 4096 4096   # Falcon 4
+python convert_to_star.py annotations.npy --flip-y --mic_shape 4092 5760   # Gatan K3 (non-superresolution)
+python convert_to_star.py annotations.npy --flip-y --mrc_dir /path/to/micrographs/
+```
+
+#### Start-End Coordinate files for Relion
+
+**Export filament start-end points for RELION helical processing:**
+```bash
+# Export per-micrograph manual pick files
+python convert_to_star.py annotations.npy --manualpick 
+
+# Split multi-point paths into individual segments
+python convert_to_star.py annotations.npy --manualpick --split_paths 
+
+# Custom output directory
+python convert_to_star.py annotations.npy --manualpick --manualpick_dir my_picks/ 
+```
+This will produce one start-end coordinate file with the suffix `_manualpick.star` for each micrograph. To properly import these files to RELION the files have to be copied in the same directory as the (motion corrected) micrographs. In Relion use the `Import` job type and specify the `Input file` location (`/path/to/your/micrographs/*_manualpick.star`) and the `Node type` ("Particle coordinates (*.box, *_pick.star)") in the `Others` tab.
+
+
 #### Key Options
 
-- `--mic_shape HEIGHT WIDTH`: Micrograph dimensions (recommended for speed)
-- `--mrc_dir PATH`: Load MRC files to auto-detect dimensions (slower)
+- `--mic_shape HEIGHT WIDTH`: Micrograph dimensions (required for `--flip-y`)
+- `--mrc_dir PATH`: Load MRC files to auto-detect dimensions (alternative to `--mic_shape`)
+- `--flip-y`: Flip Y-coordinates (convert from top-left to bottom-left origin)
 - `--manualpick`: Export start-end coordinates instead of particle positions
 - `--split_paths`: Split polylines into individual segments
 - `--inter_box_distance`: Spacing between particles in Angstroms (default: 100)
 - `--box_size`: Box size for particle extraction in pixels (default: 256)
 - `-o, --output`: Custom output filename
-
-#### Important Notes
-
-⚠️ **Coordinate System Conversion**: Either `--mic_shape` or `--mrc_dir` is **required** to correctly convert y-coordinates from napari's top-left origin to RELION's bottom-left origin. Without this, coordinates will appear vertically mirrored in RELION.
-
-✅ **Recommendation**: Use `--mic_shape` when all micrographs have the same dimensions (much faster than loading MRC files).
-
-#### Example Workflow RELION:
-
-1. Annotate fibrils in napari
-```bash
-python cryoem-fibril-annotator.py /path/to/micrographs/
-```
-
-2. Save annotations as Ab42_annotations.npy
-
-3. Convert to RELION manual pick files
-```bash
-python convert_to_star.py Ab42_annotations.npy --manualpick --mic_shape 4096 4096
-```
-
-4. Output: Ab42_annotations_manualpick/ directory with per-micrograph .star files
-- micrograph_001_manualpick.star
-- micrograph_002_manualpick.star
-- ...
-
-5. Import to RELION for helical processing
 
 
 ## Interactive Controls
@@ -300,16 +264,6 @@ python convert_to_star.py Ab42_annotations.npy --manualpick --mic_shape 4096 409
 - **magicgui** (≥0.7): Interactive GUI controls
 - **numpy**: Annotation data storage and manipulation
 
-### Memory Management
-- **Lazy Loading**: Dask arrays for memory-efficient handling of large datasets
-- **Chunked Processing**: Prevents memory overflow with large files
-- **Delayed Evaluation**: Filter operations computed on-demand
-
-### File Format Support
-- **MRC Files**: Primary format with robust error handling
-- **Stack Support**: Both individual files and stacks supported
-- **Annotation Files**: NumPy format (.npy) with pickle support for complex metadata
-
 ### Annotation Data Format
 
 The annotation file format preserves all necessary information for reproducible analysis:
@@ -333,7 +287,7 @@ annotations = {
 This tool is designed for cryo-EM structural biology workflows, specifically:
 - Manual annotation of amyloid fibril structures in micrographs
 - Ground truth generation for machine learning training datasets
-- Multi-class fibril annotation for comparative studies
+- Multi-class fibril annotation
 
 ## Keyboard Shortcuts
 
@@ -364,7 +318,3 @@ This tool is designed for cryo-EM structural biology workflows, specifically:
 - Interactive testing through the setup script
 - Handles float16/float32 conversions automatically
 - GUI requires display environment (not suitable for headless servers)
-
-## License
-
-[Add license information]

@@ -61,7 +61,7 @@ def load_annotation_file(npy_path: Path) -> Dict[str, Any]:
         annotations = np.load(npy_path, allow_pickle=True).item()
         print(f"Loaded annotations from {npy_path}")
         print(f"  - Number of shapes: {len(annotations.get('shapes', []))}")
-        print(f"  - Shape types: {annotations.get('shape_types', 'unknown')}")
+        print(f"  - Shape types: {np.unique(annotations.get('shape_types', 'unknown'))}")
         print(f"  - Pixel size: {annotations.get('pixel_size', 'unknown')} Å/px")
         print(f"  - MRC files: {len(annotations.get('mrc_files', []))}")
         return annotations
@@ -101,7 +101,7 @@ def extract_filament_coordinates(shapes: List[np.ndarray],
                                 ndim: int = 2,
                                 split_paths: bool = False,
                                 micrograph_heights: List[int] = None,
-                                csparc_coords: bool = False) -> List[Dict[str, Any]]:
+                                flip_y: bool = False) -> List[Dict[str, Any]]:
     """
     Extract start-end coordinates from line/path annotations.
 
@@ -112,7 +112,7 @@ def extract_filament_coordinates(shapes: List[np.ndarray],
         ndim: Number of dimensions (2 or 3)
         split_paths: If True, split multi-point paths into individual segments
         micrograph_heights: List of micrograph heights for coordinate conversion (napari to RELION)
-        csparc_coords: If True, skip Y-flipping (for CryoSPARC which uses top-left origin like napari)
+        flip_y: If True, flip Y-coordinates (convert from top-left to bottom-left origin)
 
     Returns:
         List of dictionaries with filament coordinate data
@@ -155,17 +155,12 @@ def extract_filament_coordinates(shapes: List[np.ndarray],
         if split_paths and len(shape) > 2:
             segments = split_path_into_segments(shape, ndim)
             for start_coords, end_coords in segments:
-                # Convert napari coordinates (top-left origin) to RELION (bottom-left origin)
-                # Skip conversion for CryoSPARC (also uses top-left origin)
+                # Optionally flip Y-coordinates (convert from top-left to bottom-left origin)
                 start_y_napari = float(start_coords[0])
                 end_y_napari = float(end_coords[0])
 
-                if csparc_coords:
-                    # CryoSPARC uses top-left origin like napari - no conversion needed
-                    start_y = start_y_napari
-                    end_y = end_y_napari
-                elif micrograph_height is not None:
-                    # RELION uses bottom-left origin - flip Y-coordinates
+                if flip_y and micrograph_height is not None:
+                    # Flip Y-coordinates (top-left to bottom-left origin)
                     start_y = micrograph_height - start_y_napari
                     end_y = micrograph_height - end_y_napari
                 else:
@@ -192,17 +187,12 @@ def extract_filament_coordinates(shapes: List[np.ndarray],
                 start_coords = shape[0]   # [y, x]
                 end_coords = shape[-1]    # [y, x]
 
-            # Convert napari coordinates (top-left origin) to RELION (bottom-left origin)
-            # Skip conversion for CryoSPARC (also uses top-left origin)
+            # Optionally flip Y-coordinates (convert from top-left to bottom-left origin)
             start_y_napari = float(start_coords[0])
             end_y_napari = float(end_coords[0])
 
-            if csparc_coords:
-                # CryoSPARC uses top-left origin like napari - no conversion needed
-                start_y = start_y_napari
-                end_y = end_y_napari
-            elif micrograph_height is not None:
-                # RELION uses bottom-left origin - flip Y-coordinates
+            if flip_y and micrograph_height is not None:
+                # Flip Y-coordinates (top-left to bottom-left origin)
                 start_y = micrograph_height - start_y_napari
                 end_y = micrograph_height - end_y_napari
             else:
@@ -439,37 +429,29 @@ def main():
         epilog="""
 Examples:
   # Basic conversion with micrograph shape (RECOMMENDED - fast)
-  python convert_to_star.py annotations.npy --mic_shape 4096 4096   # For Falcon 4 camera
-  python convert_to_star.py annotations.npy --mic_shape 4092 5760   # For Gatan K3 (non-superresolution)
+  python convert_to_star.py annotations.npy 
+  python convert_to_star.py annotations.npy 
 
   # Override pixel size if MRC header has incorrect value
-  python convert_to_star.py annotations.npy --mic_shape 4096 4096 --pixel_size 1.05
+  python convert_to_star.py annotations.npy --pixel_size 1.05
 
-  # Export for CryoSPARC (skip Y-coordinate flipping)
-  python convert_to_star.py annotations.npy --csparc_coords --mic_shape 4096 4096
+  # Flip Y-coordinates if needed
+  python convert_to_star.py annotations.npy --flip-y --mic_shape 4096 4096
 
   # Export manual pick files with micrograph shape
-  python convert_to_star.py annotations.npy --manualpick --mic_shape 4096 4096
+  python convert_to_star.py annotations.npy --manualpick 
 
   # Custom inter-box distance with coordinate conversion
-  python convert_to_star.py annotations.npy --inter_box_distance 150 --mic_shape 4096 4096
+  python convert_to_star.py annotations.npy --inter_box_distance 150 
 
   # Export manual pick files and split multi-point paths into segments
-  python convert_to_star.py annotations.npy --manualpick --split_paths --mic_shape 4096 4096
-
-  # Alternative: Load MRC files to determine shape automatically (slower)
-  python convert_to_star.py annotations.npy --manualpick --mrc_dir /path/to/micrographs/
+  python convert_to_star.py annotations.npy --manualpick --split_paths 
 
   # Specify output file
-  python convert_to_star.py annotations.npy -o fibrils.star --mic_shape 4096 4096
+  python convert_to_star.py annotations.npy -o fibrils.star 
 
-Note: Either --mic_shape or --mrc_dir is required to correctly convert y-coordinates from
-napari (top-left origin) to RELION (bottom-left origin) convention. Without either option,
-coordinates will appear vertically mirrored in RELION. Use --mic_shape for speed when all
-micrographs have the same dimensions.
-
-For CryoSPARC: Use --csparc_coords to skip Y-coordinate flipping, since CryoSPARC uses the
-same top-left origin convention as napari (unlike RELION which uses bottom-left origin).
+Note: By default, Y-coordinates are NOT flipped. Use --flip-y with --mic_shape or --mrc_dir
+if you need to convert from top-left origin (napari default) to bottom-left origin convention.
         """
     )
 
@@ -493,8 +475,8 @@ same top-left origin convention as napari (unlike RELION which uses bottom-left 
                        help='Micrograph shape as HEIGHT WIDTH (alternative to --mrc_dir, faster)')
     parser.add_argument('--pixel_size', type=float,
                        help='Override pixel size in Angstroms (use if MRC header pixel size is incorrect)')
-    parser.add_argument('--csparc_coords', action='store_true',
-                       help='Skip Y-coordinate flipping for CryoSPARC compatibility (CryoSPARC uses top-left origin like napari)')
+    parser.add_argument('--flip-y', action='store_true',
+                       help='Flip Y-coordinates (convert from top-left to bottom-left origin)')
 
     args = parser.parse_args()
 
@@ -541,11 +523,8 @@ same top-left origin convention as napari (unlike RELION which uses bottom-left 
         micrograph_heights = None
 
         # Inform user about coordinate convention
-        if args.csparc_coords:
-            print("=" * 70)
-            print("CryoSPARC mode: Y-coordinates will NOT be flipped")
-            print("CryoSPARC uses top-left origin (same as napari)")
-            print("=" * 70)
+        if args.flip_y:
+            print("Y-coordinate flipping enabled")
 
         if args.mic_shape:
             # Use provided micrograph shape (fast method)
@@ -579,9 +558,10 @@ same top-left origin convention as napari (unlike RELION which uses bottom-left 
                 print("Warning: No MRC files found. Coordinates will not be converted.")
                 micrograph_heights = None
         else:
-            print("Warning: Neither --mic_shape nor --mrc_dir specified.")
-            print("         Y-coordinates will NOT be converted to RELION convention.")
-            print("         This may cause coordinates to appear mirrored in RELION.")
+            if args.flip_y:
+                print("Error: --flip-y specified but neither --mic_shape nor --mrc_dir provided.")
+                print("       Y-coordinates cannot be flipped without micrograph dimensions.")
+                return 1
             micrograph_heights = None
 
         # Extract filament coordinates
@@ -593,7 +573,7 @@ same top-left origin convention as napari (unlike RELION which uses bottom-left 
             annotations.get('ndim', 2),
             split_paths=args.split_paths,
             micrograph_heights=micrograph_heights,
-            csparc_coords=args.csparc_coords
+            flip_y=args.flip_y
         )
 
         if not filaments:

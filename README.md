@@ -28,7 +28,7 @@ conda activate cryoem-annotator
 ### Automated Setup
 
 ```bash
-# Full automated setup (recommended)
+# Full automated setup
 bash setup_cryoem_env.sh
 ```
 

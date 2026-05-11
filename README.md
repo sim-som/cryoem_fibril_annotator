@@ -172,7 +172,7 @@ _rlnHelicalTubeID #6
 **2. Manual Pick Mode (`--manualpick`)**
 - Exports start-end coordinates for each fibril
 - Creates one .star file per micrograph
-- Compatible with RELION manual picking format
+- Compatible with RELION manual picking format (up to RELION ver. 5.0)
 
 **Output format:**
 ```
